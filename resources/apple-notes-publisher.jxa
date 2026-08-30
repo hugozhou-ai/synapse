@@ -1,0 +1,34 @@
+function run(argv) {
+  if (argv.length !== 1) throw new Error("Expected one JSON argument.");
+  const request = JSON.parse(argv[0]);
+  const Notes = Application("Notes");
+  Notes.includeStandardAdditions = true;
+
+  const accounts = Notes.accounts();
+  const account = request.account
+    ? accounts.find((candidate) => candidate.name() === request.account)
+    : accounts[0];
+  if (!account) throw new Error("Apple Notes account not found.");
+
+  const folders = account.folders();
+  let folder = folders.find((candidate) => candidate.name() === request.folder);
+  if (!folder && request.existingExternalId) {
+    throw new Error("The configured Apple Notes folder no longer exists.");
+  }
+  if (!folder) {
+    folder = Notes.Folder({ name: request.folder });
+    account.folders.push(folder);
+  }
+
+  if (request.existingExternalId) {
+    const note = account.notes().find((candidate) => candidate.id() === request.existingExternalId);
+    if (!note) throw new Error("The linked Apple Note no longer exists; relink it before retrying.");
+    note.name = request.title;
+    note.body = request.html;
+    return JSON.stringify({ externalId: note.id(), updated: true });
+  }
+
+  const note = Notes.Note({ name: request.title, body: request.html });
+  folder.notes.push(note);
+  return JSON.stringify({ externalId: note.id(), updated: false });
+}
