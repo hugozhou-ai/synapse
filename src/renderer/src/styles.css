@@ -222,7 +222,8 @@ html[data-surface="widget"] #root {
 .selection-actions { display: flex; border: 1px solid var(--line); }
 .selection-actions button, .editor-tabs button, .detail-actions button { min-height: 30px; padding: 0 10px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 0; border-right: 1px solid var(--line); color: var(--muted); background: transparent; font: 8px/1 var(--mono); cursor: pointer; }
 .selection-actions button:last-child, .editor-tabs button:last-child, .detail-actions button:last-child { border-right: 0; }
-.selection-actions button:hover, .detail-actions button:hover { color: var(--reverse); background: var(--ink); }
+.selection-actions button:hover, .detail-actions button:hover:not(:disabled) { color: var(--reverse); background: var(--ink); }
+.detail-actions button:disabled { opacity: .48; cursor: default; }
 .turn-list { max-height: 550px; overflow: auto; }
 .turn-row { position: relative; width: 100%; min-height: 103px; padding: 15px 17px; display: grid; grid-template-columns: 20px 31px minmax(0, 1fr); gap: 11px; border: 0; border-bottom: 1px solid var(--line); color: inherit; text-align: left; background: transparent; cursor: pointer; user-select: none; }
 .turn-row:last-child { border-bottom: 0; }
@@ -393,7 +394,6 @@ input:not([type="checkbox"]) { min-height: 41px; }
 .history-editor { padding-top: 74px; }
 .detail-actions { position: absolute; z-index: 2; top: 15px; right: 15px; display: flex; border: 1px solid var(--line-strong); background: var(--paper); }
 .detail-actions button { border-right-color: var(--line-strong); }
-.detail-actions .delete-summary-action.confirming { color: var(--ink); box-shadow: inset 0 -2px var(--accent); }
 .version-history { padding: 20px 31px; display: grid; gap: 8px; border-top: 1px solid var(--line-strong); color: var(--muted); font: 7px/1.4 var(--mono); }
 .version-history strong { margin-bottom: 4px; color: var(--ink); font-size: 9px; text-transform: uppercase; }
 
@@ -504,7 +504,7 @@ input:not([type="checkbox"]) { min-height: 41px; }
     --reverse: #202220;
     --shadow: 0 22px 70px rgba(0, 0, 0, .42);
   }
-  .secondary:hover:not(:disabled), .selection-actions button:hover, .detail-actions button:hover { color: #202220; }
+  .secondary:hover:not(:disabled), .selection-actions button:hover, .detail-actions button:hover:not(:disabled) { color: #202220; }
   .detail-actions { background: var(--paper); }
 }
 
