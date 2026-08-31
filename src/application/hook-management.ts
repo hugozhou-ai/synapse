@@ -1,9 +1,11 @@
 import type { CodexHookConfigStore, CodexSessionRepository, HookInstallationStatus, HookRelayInstaller, HookTrustGateway, SettingsRepository } from "./ports";
+import { DomainError } from "@domain/shared";
 import type { Logger } from "@shared/logger";
 
 export interface HookManagementService {
   inspect(): Promise<HookInstallationStatus>;
   install(): Promise<HookInstallationStatus>;
+  trust(): Promise<HookInstallationStatus>;
   uninstall(): Promise<HookInstallationStatus>;
   dismissOnboarding(): Promise<HookInstallationStatus>;
 }
@@ -17,6 +19,7 @@ export class CodexHookManagementService implements HookManagementService {
     private readonly configPath: string,
     private readonly logger: Logger,
     private readonly settings: SettingsRepository,
+    private readonly defaultInspectionCwd: string,
   ) {}
 
   async inspect(): Promise<HookInstallationStatus> {
@@ -24,31 +27,31 @@ export class CodexHookManagementService implements HookManagementService {
     const relayInstalled = await this.relayInstaller.exists();
     const installed = relayInstalled && config.manifest !== null && hasOwnedHooks(config.raw, config.manifest.command);
     const onboardingRequired = !installed && !(await this.settings.read()).hookSetupAcknowledged;
-    const knownSessions = await this.sessions.search({ limit: 200, offset: 0 });
-    const cwds = [...new Set(knownSessions.map((session) => session.snapshot.cwd).filter(Boolean))];
+    const cwds = await this.inspectionCwds();
     let trustStates = [] as Awaited<ReturnType<HookTrustGateway["inspect"]>>;
     let message: string | null = null;
     if (installed) {
       try {
-        trustStates = await this.trustGateway.inspect(cwds);
-        message = trustStates.some((state) => state.status !== "trusted" && state.status !== "managed")
-          ? "请在 Codex 中打开 /hooks，检查并信任 Synapse Hook。"
-          : trustStates.length === 0
-            ? "Hook 已安装。请在新的 Codex 任务中打开 /hooks，确认并信任 Managed by Synapse。"
+        trustStates = await this.trustGateway.inspect(cwds, this.relayInstaller.relayPath, this.configPath);
+        message = trustStates.some((state) => state.status === "untrusted" || state.status === "modified")
+          ? "Hook 已安装但尚未启用。请检查命令后点击“信任并启用”。"
+          : trustStates.some((state) => state.status === "unknown") || trustStates.length === 0
+            ? "Hook 已安装，但暂时无法确认信任状态。"
             : null;
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
-        message = `Hook 已安装，但暂时无法检查信任状态：${detail}。请在 Codex 中打开 /hooks 手动确认。`;
+        message = `Hook 已安装，但暂时无法检查信任状态：${detail}。`;
         this.logger.error("[synapse:hook]", "trust-inspection-failed", { message: detail, cwds });
       }
     } else if (relayInstalled || config.manifest !== null) {
       message = "Synapse Hook 安装不完整，请点击“修复安装”。";
     }
     this.logger.info("[synapse:hook]", "installation-status-inspected", {
-      installed, onboardingRequired, relayInstalled, hasManifest: config.manifest !== null, knownCwdCount: cwds.length,
+      installed, trusted: isTrusted(trustStates), onboardingRequired, relayInstalled, hasManifest: config.manifest !== null, inspectionCwdCount: cwds.length,
     });
     return {
       installed,
+      trusted: installed && isTrusted(trustStates),
       onboardingRequired,
       relayPath: this.relayInstaller.relayPath,
       configPath: this.configPath,
@@ -61,6 +64,15 @@ export class CodexHookManagementService implements HookManagementService {
     await this.relayInstaller.install();
     await this.configStore.mergeOwnedHooks({ command: this.relayInstaller.relayPath, statusMessage: "Managed by Synapse" });
     await this.acknowledgeOnboarding();
+    return this.inspect();
+  }
+
+  async trust(): Promise<HookInstallationStatus> {
+    const status = await this.inspect();
+    if (!status.installed) throw new DomainError("HOOK_NOT_INSTALLED", "请先安装 Synapse Hook。");
+    const cwds = await this.inspectionCwds();
+    await this.trustGateway.trust(cwds, this.relayInstaller.relayPath, this.configPath);
+    this.logger.info("[synapse:hook]", "hooks-trusted", { inspectionCwdCount: cwds.length });
     return this.inspect();
   }
 
@@ -82,6 +94,16 @@ export class CodexHookManagementService implements HookManagementService {
     const current = await this.settings.read();
     if (!current.hookSetupAcknowledged) await this.settings.save({ ...current, hookSetupAcknowledged: true });
   }
+
+  private async inspectionCwds(): Promise<readonly string[]> {
+    const knownSessions = await this.sessions.search({ limit: 200, offset: 0 });
+    const known = [...new Set(knownSessions.map((session) => session.snapshot.cwd).filter(Boolean))];
+    return known.length > 0 ? known : [this.defaultInspectionCwd];
+  }
+}
+
+function isTrusted(states: readonly { status: string }[]): boolean {
+  return states.length > 0 && states.every((state) => state.status === "trusted" || state.status === "managed");
 }
 
 const ownedEvents = ["SessionStart", "UserPromptSubmit", "Stop"] as const;

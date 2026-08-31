@@ -81,6 +81,8 @@ Hook 与 App Server 原始 DTO 分别通过 `CodexHookProtocolMapper`、`CodexPr
 
 `CodexHookManagementService` 同时维护首次 Hook 设置是否已由用户处理。启动时，`ElectronWindowManager` 只在 Hook 未安装且用户从未完成或跳过引导时自动打开设置；安装、明确跳过或主动卸载都会持久化确认状态，避免后续启动反复打扰。
 
+Hook 安装与 Hook 信任是两个独立步骤。`HookTrustGateway` 通过 App Server `hooks/list` 获取 Codex 计算的 handler key、当前哈希和信任状态，只选择命令与 Synapse 稳定 relay 路径精确匹配的 handler。Renderer 必须先向用户展示完整命令和事件，再由 `CodexHookManagementService.trust()` 调用基础设施网关；网关通过 App Server `config/batchWrite` 原子写入 `hooks.state.<key>.trusted_hash` 并重新读取状态验证。不得静默批准、信任其他 handler，或自行计算信任哈希。
+
 Renderer 顶层由 `RendererErrorBoundary` 隔离渲染异常，并通过类型化 diagnostics IPC 将 `window error`、未处理 Promise 和 React component stack 写入统一的 `[synapse:renderer]` 日志；页面加载失败或 Renderer 进程退出也由主进程记录，避免仅显示无诊断信息的白屏。
 
 总结 thread 使用：

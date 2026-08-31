@@ -80,7 +80,7 @@ export class ElectronApplicationContainer {
     const configStore = new JsonCodexHookConfigStore(codexDirectory, supportDirectory, logger);
     const relayPath = join(supportDirectory, "bin", "codex-hook-relay.sh");
     const relay = new FileSystemHookRelayInstaller(relayPath, resourcePath(app, "codex-hook-relay.sh"), logger);
-    const hookManagement = new CodexHookManagementService(configStore, relay, appServer, sessions, configStore.hooksPath, logger, settingsRepository);
+    const hookManagement = new CodexHookManagementService(configStore, relay, appServer, sessions, configStore.hooksPath, logger, settingsRepository, homedir());
     const receiver = new UnixSocketHookEventReceiver(
       join(supportDirectory, "run", "hook.sock"), awareness, new CodexHookProtocolMapper(),
       new FileSystemHookEventSpool(join(supportDirectory, "spool")), logger, onSessionsChanged,

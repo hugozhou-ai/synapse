@@ -12,14 +12,15 @@ export function Widget() {
   const [expanded, setExpanded] = useState(false);
   const running = sessions.filter((session) => session.status === "running").length;
   const ready = sessions.filter((session) => session.status === "ready").length;
+  const hooksReady = hooks?.installed === true && hooks.trusted;
   const toggle = () => { const next = !expanded; setExpanded(next); void window.synapse.window.resizeWidget(next); };
   return <main className={`widget-shell ${expanded ? "expanded" : ""}`}>
     <div className="widget-top drag-region">
       <div className="synapse-mark"><Sparkles size={15} /><span>Synapse</span></div>
       <div className="widget-counters no-drag">
         <span className="counter running"><span className="live-dot" />{running} 进行中</span>
-        {hooks && !hooks.installed
-          ? <button className="counter warning" onClick={() => window.synapse.window.openSettings()}>Hook 未安装</button>
+        {hooks && !hooksReady
+          ? <button className="counter warning" onClick={() => window.synapse.window.openSettings()}>{hooks.installed ? "Hook 待信任" : "Hook 未安装"}</button>
           : <span className="counter ready">{ready} 待整理</span>}
         <button className="icon-button" onClick={() => window.synapse.window.openSettings()} aria-label="打开设置"><Settings size={15} /></button>
         <button className="icon-button" onClick={toggle} aria-label={expanded ? "收起" : "展开"}>{expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
@@ -27,7 +28,7 @@ export function Widget() {
     </div>
     {expanded && <div className="widget-body no-drag">
       {sessions.slice(0, 3).map((session) => <SessionMiniCard key={session.id} session={session} />)}
-      {sessions.length === 0 && <EmptyState compact><span>{hooks?.installed ? "等待新的 Codex 任务" : "需要先安装并信任 Codex Hook"}</span><button className="secondary tiny" onClick={() => window.synapse.window.openSettings()}>检查 Hook 设置</button></EmptyState>}
+      {sessions.length === 0 && <EmptyState compact><span>{hooksReady ? "等待新的 Codex 任务" : "需要先安装并信任 Codex Hook"}</span><button className="secondary tiny" onClick={() => window.synapse.window.openSettings()}>检查 Hook 设置</button></EmptyState>}
       {sessions.length > 3 && <button className="more-row" onClick={() => window.synapse.window.openHistory()}>+{sessions.length - 3} 个任务 · 查看全部</button>}
       <button className="widget-history" onClick={() => window.synapse.window.openHistory()}><BookOpen size={14} /> 打开历史</button>
     </div>}

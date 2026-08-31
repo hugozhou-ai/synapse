@@ -7,13 +7,13 @@ const manifest: HookInstallManifest = { command: "/support/relay", featureEnable
 
 describe("CodexHookManagementService", () => {
   it("does not report an incomplete installation as healthy", async () => {
-    const service = createService({ hooks: {} }, { inspect: vi.fn().mockResolvedValue([]) });
-    await expect(service.inspect()).resolves.toMatchObject({ installed: false, onboardingRequired: true, message: "Synapse Hook 安装不完整，请点击“修复安装”。" });
+    const service = createService({ hooks: {} }, trustGateway([]));
+    await expect(service.inspect()).resolves.toMatchObject({ installed: false, trusted: false, onboardingRequired: true, message: "Synapse Hook 安装不完整，请点击“修复安装”。" });
   });
 
   it("keeps Hook awareness available when App Server trust inspection fails", async () => {
     const logger: Logger = { info: vi.fn(), error: vi.fn() };
-    const service = createService(ownedConfiguration(), { inspect: vi.fn().mockRejectedValue(new Error("app server unavailable")) }, logger);
+    const service = createService(ownedConfiguration(), { inspect: vi.fn().mockRejectedValue(new Error("app server unavailable")), trust: vi.fn() }, logger);
     const status = await service.inspect();
     expect(status.installed).toBe(true);
     expect(status.message).toContain("Hook 已安装，但暂时无法检查信任状态");
@@ -21,18 +21,29 @@ describe("CodexHookManagementService", () => {
   });
 
   it("instructs first-time users to trust an installed Hook when no cwd is known", async () => {
-    const service = createService(ownedConfiguration(), { inspect: vi.fn().mockResolvedValue([]) });
-    await expect(service.inspect()).resolves.toMatchObject({ installed: true, onboardingRequired: false, message: expect.stringContaining("/hooks") });
+    const service = createService(ownedConfiguration(), trustGateway([{ cwd: "/home", status: "untrusted", hooks: [candidate("untrusted")] }]));
+    await expect(service.inspect()).resolves.toMatchObject({ installed: true, trusted: false, onboardingRequired: false, message: expect.stringContaining("信任并启用") });
+  });
+
+  it("trusts the exact installed command and reports the installation ready", async () => {
+    let trusted = false;
+    const gateway: HookTrustGateway = {
+      inspect: vi.fn().mockImplementation(async () => [{ cwd: "/home", status: trusted ? "trusted" : "untrusted", hooks: [candidate(trusted ? "trusted" : "untrusted")] }]),
+      trust: vi.fn().mockImplementation(async (_cwds, command, sourcePath) => { expect(command).toBe("/support/relay"); expect(sourcePath).toBe("/codex/hooks.json"); trusted = true; }),
+    };
+    const service = createService(ownedConfiguration(), gateway);
+    await expect(service.trust()).resolves.toMatchObject({ installed: true, trusted: true, message: null });
+    expect(gateway.trust).toHaveBeenCalledWith(["/home"], "/support/relay", "/codex/hooks.json");
   });
 
   it("does not repeat onboarding after the user explicitly dismisses it", async () => {
-    const service = createService({ hooks: {} }, { inspect: vi.fn().mockResolvedValue([]) });
+    const service = createService({ hooks: {} }, trustGateway([]));
     expect((await service.inspect()).onboardingRequired).toBe(true);
     expect((await service.dismissOnboarding()).onboardingRequired).toBe(false);
   });
 
   it("does not reopen first-run onboarding after an intentional uninstall", async () => {
-    const service = createService(ownedConfiguration(), { inspect: vi.fn().mockResolvedValue([]) });
+    const service = createService(ownedConfiguration(), trustGateway([]));
     expect((await service.inspect()).installed).toBe(true);
     await expect(service.uninstall()).resolves.toMatchObject({ installed: false, onboardingRequired: false });
   });
@@ -68,10 +79,18 @@ function createService(raw: Record<string, unknown>, trust: HookTrustGateway, lo
     read: vi.fn().mockImplementation(async () => currentSettings),
     save: vi.fn().mockImplementation(async (value: ApplicationSettings) => { currentSettings = value; }),
   };
-  return new CodexHookManagementService(config, relay, trust, sessions, "/codex/hooks.json", logger, settings);
+  return new CodexHookManagementService(config, relay, trust, sessions, "/codex/hooks.json", logger, settings, "/home");
 }
 
 function ownedConfiguration(): Record<string, unknown> {
   const group = { hooks: [{ type: "command", command: "'/support/relay'", statusMessage: "Managed by Synapse" }] };
   return { hooks: { SessionStart: [group], UserPromptSubmit: [group], Stop: [group] } };
+}
+
+function trustGateway(states: Awaited<ReturnType<HookTrustGateway["inspect"]>>): HookTrustGateway {
+  return { inspect: vi.fn().mockResolvedValue(states), trust: vi.fn() };
+}
+
+function candidate(status: "trusted" | "untrusted") {
+  return { key: "hooks.json:stop:0:0", eventName: "stop", command: "'/support/relay'", currentHash: `sha256:${"a".repeat(64)}`, status } as const;
 }

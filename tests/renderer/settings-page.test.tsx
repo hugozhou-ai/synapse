@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { HookInstallationStatus } from "@application/ports";
 import { RendererErrorBoundary } from "../../src/renderer/src/components/RendererErrorBoundary";
 import { SettingsPage } from "../../src/renderer/src/features/settings/SettingsPage";
 
@@ -23,11 +25,27 @@ describe("SettingsPage", () => {
     expect(screen.getByRole("heading", { name: "页面加载失败" })).toBeTruthy();
     await waitFor(() => expect(reportRendererError).toHaveBeenCalledWith(expect.objectContaining({ kind: "react-error", message: "render failed" })));
   });
+
+  it("requires an explicit command review before trusting installed hooks", async () => {
+    const trust = vi.fn().mockResolvedValue({ installed: true, trusted: true, onboardingRequired: false, relayPath: "/relay", configPath: "/hooks.json", trustStates: [], message: null });
+    installSettingsApi({
+      installed: true, trusted: false, onboardingRequired: false, relayPath: "/relay", configPath: "/hooks.json", message: "待信任",
+      trustStates: [{ cwd: "/repo", status: "untrusted", hooks: [{ key: "key", eventName: "stop", command: "'/relay'", currentHash: `sha256:${"a".repeat(64)}`, status: "untrusted" }] }],
+    }, trust);
+    render(<SettingsPage />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "检查并信任" }));
+    expect(screen.getByRole("heading", { name: "信任 Synapse Hook" })).toBeTruthy();
+    expect(screen.getByText("'/relay'")).toBeTruthy();
+    expect(trust).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "信任并启用（1）" }));
+    await waitFor(() => expect(trust).toHaveBeenCalledOnce());
+  });
 });
 
 function Broken(): never { throw new Error("render failed"); }
 
-function installSettingsApi() {
+function installSettingsApi(hookStatus: HookInstallationStatus = { installed: false, trusted: false, onboardingRequired: true, relayPath: "/relay", configPath: "/hooks.json", trustStates: [], message: null }, trust = vi.fn()) {
   Object.defineProperty(window, "synapse", {
     configurable: true,
     value: {
@@ -40,8 +58,8 @@ function installSettingsApi() {
         models: vi.fn().mockResolvedValue([]), notesTargets: vi.fn().mockResolvedValue({ accounts: [] }), update: vi.fn(),
       },
       hooks: {
-        inspect: vi.fn().mockResolvedValue({ installed: false, onboardingRequired: true, relayPath: "/relay", configPath: "/hooks.json", trustStates: [], message: null }),
-        install: vi.fn(), uninstall: vi.fn(), dismissOnboarding: vi.fn(),
+        inspect: vi.fn().mockResolvedValue(hookStatus),
+        install: vi.fn(), trust, uninstall: vi.fn(), dismissOnboarding: vi.fn(),
       },
       profiles: { list: vi.fn().mockResolvedValue([]), save: vi.fn(), delete: vi.fn() },
     },

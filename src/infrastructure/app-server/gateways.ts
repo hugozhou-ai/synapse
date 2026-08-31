@@ -131,12 +131,90 @@ function createTurnCompletionWaiter(client: CodexAppServerClient, threadId: stri
 
 export class AppServerHookTrustGateway implements HookTrustGateway {
   constructor(private readonly client: CodexAppServerClient) {}
-  async inspect(cwds: readonly string[]): Promise<readonly HookTrustState[]> {
-    const response = await this.client.request<{ data?: Array<{ cwd?: string; hooks?: Array<{ statusMessage?: string | null; trustStatus?: HookTrustState["status"] }> }> }>("hooks/list", { cwds });
-    return (response.data ?? []).map((entry) => {
-      const owned = (entry.hooks ?? []).filter((hook) => hook.statusMessage === "Managed by Synapse");
-      return { cwd: String(entry.cwd ?? ""), status: worstTrust(owned.map((hook) => hook.trustStatus ?? "unknown")) };
+  async inspect(cwds: readonly string[], ownedCommand: string, ownedSourcePath: string): Promise<readonly HookTrustState[]> {
+    const entries = await this.list(cwds);
+    return entries.map((entry) => {
+      const hooks = entry.hooks.filter((hook) => isOwnedHook(hook, ownedCommand, ownedSourcePath)).map(toTrustCandidate);
+      return { cwd: entry.cwd, status: worstTrust(hooks.map((hook) => hook.status)), hooks };
     });
+  }
+
+  async trust(cwds: readonly string[], ownedCommand: string, ownedSourcePath: string): Promise<void> {
+    const entries = await this.list(cwds);
+    const candidates = uniqueHooks(entries.flatMap((entry) => entry.hooks).filter((hook) => isOwnedHook(hook, ownedCommand, ownedSourcePath)));
+    if (candidates.length === 0) throw new DomainError("HOOK_TRUST_UNAVAILABLE", "Codex App Server 未返回 Synapse Hook，请重新安装后再试。");
+    const pending = candidates.filter((hook) => hook.trustStatus === "untrusted" || hook.trustStatus === "modified");
+    if (pending.length === 0) return;
+    for (const hook of pending) validateTrustCandidate(hook);
+    await this.client.request("config/batchWrite", {
+      edits: pending.map((hook) => ({
+        keyPath: `hooks.state.${JSON.stringify(hook.key)}.trusted_hash`,
+        value: hook.currentHash,
+        mergeStrategy: "upsert",
+      })),
+      reloadUserConfig: true,
+    });
+    const verified = await this.inspect(cwds, ownedCommand, ownedSourcePath);
+    if (verified.some((entry) => entry.status !== "trusted" && entry.status !== "managed")) {
+      throw new DomainError("HOOK_TRUST_NOT_APPLIED", "Codex 未确认 Hook 信任状态，请重新检查后再试。");
+    }
+  }
+
+  private async list(cwds: readonly string[]): Promise<HookListEntry[]> {
+    const response = await this.client.request<{ data?: RawHookListEntry[] }>("hooks/list", { cwds });
+    return (response.data ?? []).map((entry) => ({
+      cwd: String(entry.cwd ?? ""),
+      hooks: (entry.hooks ?? []).map((hook) => ({
+        key: String(hook.key ?? ""),
+        eventName: String(hook.eventName ?? ""),
+        command: String(hook.command ?? ""),
+        sourcePath: String(hook.sourcePath ?? ""),
+        currentHash: String(hook.currentHash ?? ""),
+        trustStatus: hook.trustStatus ?? "unknown",
+      })),
+    }));
+  }
+}
+
+interface RawHookListEntry {
+  readonly cwd?: unknown;
+  readonly hooks?: Array<{
+    readonly key?: unknown;
+    readonly eventName?: unknown;
+    readonly command?: unknown;
+    readonly sourcePath?: unknown;
+    readonly currentHash?: unknown;
+    readonly trustStatus?: HookTrustState["status"];
+  }>;
+}
+
+interface HookListEntry { readonly cwd: string; readonly hooks: readonly ListedHook[]; }
+interface ListedHook {
+  readonly key: string;
+  readonly eventName: string;
+  readonly command: string;
+  readonly sourcePath: string;
+  readonly currentHash: string;
+  readonly trustStatus: HookTrustState["status"];
+}
+
+function toTrustCandidate(hook: ListedHook): HookTrustState["hooks"][number] {
+  return { key: hook.key, eventName: hook.eventName, command: hook.command, currentHash: hook.currentHash, status: hook.trustStatus };
+}
+
+function isOwnedHook(hook: ListedHook, ownedCommand: string, ownedSourcePath: string): boolean {
+  return hook.sourcePath === ownedSourcePath && (hook.command === ownedCommand || hook.command === quoteCommand(ownedCommand));
+}
+
+function quoteCommand(path: string): string { return `'${path.replaceAll("'", `'\\''`)}'`; }
+
+function uniqueHooks(hooks: readonly ListedHook[]): ListedHook[] {
+  return [...new Map(hooks.map((hook) => [`${hook.key}\0${hook.currentHash}`, hook])).values()];
+}
+
+function validateTrustCandidate(hook: ListedHook): void {
+  if (!hook.key || !/^sha256:[a-f0-9]{64}$/.test(hook.currentHash)) {
+    throw new DomainError("HOOK_TRUST_INVALID", "Codex 返回的 Hook 信任信息无效，已拒绝写入配置。");
   }
 }
 

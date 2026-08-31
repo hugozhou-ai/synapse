@@ -31,6 +31,7 @@ export interface SynapseApi {
   hooks: {
     inspect(): Promise<HookInstallationStatus>;
     install(): Promise<HookInstallationStatus>;
+    trust(): Promise<HookInstallationStatus>;
     uninstall(): Promise<HookInstallationStatus>;
     dismissOnboarding(): Promise<HookInstallationStatus>;
   };

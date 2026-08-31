@@ -73,11 +73,15 @@ export class LazyCodexAppServerRuntime implements
     return (await this.requireAdapters()).agent.listModels();
   }
 
-  async inspect(cwds: readonly string[]): Promise<readonly HookTrustState[]> {
+  async inspect(cwds: readonly string[], ownedCommand: string, ownedSourcePath: string): Promise<readonly HookTrustState[]> {
     this.start();
     const adapters = this.adapters;
-    if (!adapters) return cwds.map((cwd) => ({ cwd, status: "unknown" }));
-    return adapters.trust.inspect(cwds);
+    if (!adapters) return cwds.map((cwd) => ({ cwd, status: "unknown", hooks: [] }));
+    return adapters.trust.inspect(cwds, ownedCommand, ownedSourcePath);
+  }
+
+  async trust(cwds: readonly string[], ownedCommand: string, ownedSourcePath: string): Promise<void> {
+    return (await this.requireAdapters()).trust.trust(cwds, ownedCommand, ownedSourcePath);
   }
 
   async close(): Promise<void> {

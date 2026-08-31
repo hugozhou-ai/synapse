@@ -52,6 +52,7 @@ export class ElectronIpcController {
     this.handle("settings:runtime", z.unknown(), () => this.container.settings.runtime());
     this.handle("hooks:inspect", z.unknown(), () => this.container.hookManagement.inspect());
     this.handle("hooks:install", z.unknown(), () => this.container.hookManagement.install());
+    this.handle("hooks:trust", z.unknown(), () => this.container.hookManagement.trust());
     this.handle("hooks:uninstall", z.unknown(), () => this.container.hookManagement.uninstall());
     this.handle("hooks:dismiss-onboarding", z.unknown(), () => this.container.hookManagement.dismissOnboarding());
     this.handle("export:markdown", idSchema, (id) => this.container.exports.markdown(id));

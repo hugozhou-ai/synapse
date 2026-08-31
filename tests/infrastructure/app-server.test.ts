@@ -89,11 +89,35 @@ describe("App Server adapters", () => {
 
   it("reports the worst trust state for Synapse-owned hooks", async () => {
     const gateway = new AppServerHookTrustGateway(fakeClient(async () => ({ data: [{ cwd: "/repo", hooks: [
-      { statusMessage: "Managed by Synapse", trustStatus: "trusted" },
-      { statusMessage: "Managed by Synapse", trustStatus: "modified" },
-      { statusMessage: "User hook", trustStatus: "untrusted" },
+      { key: "one", eventName: "sessionStart", command: "'/support/relay'", sourcePath: "/hooks.json", currentHash: `sha256:${"a".repeat(64)}`, trustStatus: "trusted" },
+      { key: "two", eventName: "stop", command: "'/support/relay'", sourcePath: "/hooks.json", currentHash: `sha256:${"b".repeat(64)}`, trustStatus: "modified" },
+      { key: "other", eventName: "stop", command: "/user/hook", sourcePath: "/hooks.json", currentHash: `sha256:${"c".repeat(64)}`, trustStatus: "untrusted" },
     ] }] })));
-    await expect(gateway.inspect(["/repo"])).resolves.toEqual([{ cwd: "/repo", status: "modified" }]);
+    await expect(gateway.inspect(["/repo"], "/support/relay", "/hooks.json")).resolves.toEqual([{
+      cwd: "/repo", status: "modified", hooks: [
+        { key: "one", eventName: "sessionStart", command: "'/support/relay'", currentHash: `sha256:${"a".repeat(64)}`, status: "trusted" },
+        { key: "two", eventName: "stop", command: "'/support/relay'", currentHash: `sha256:${"b".repeat(64)}`, status: "modified" },
+      ],
+    }]);
+  });
+
+  it("persists only exact Synapse hook hashes through the App Server config API", async () => {
+    const requests: Array<{ method: string; params: unknown }> = [];
+    let trusted = false;
+    const gateway = new AppServerHookTrustGateway(fakeClient(async (method, params) => {
+      requests.push({ method, params });
+      if (method === "config/batchWrite") { trusted = true; return { status: "ok" }; }
+      return { data: [{ cwd: "/repo", hooks: [
+        { key: "/hooks.json:stop:0:0", eventName: "stop", command: "'/support/relay'", sourcePath: "/hooks.json", currentHash: `sha256:${"d".repeat(64)}`, trustStatus: trusted ? "trusted" : "untrusted" },
+        { key: "/hooks.json:stop:1:0", eventName: "stop", command: "'/user/hook'", sourcePath: "/hooks.json", currentHash: `sha256:${"e".repeat(64)}`, trustStatus: "untrusted" },
+        { key: "/repo/hooks.json:stop:0:0", eventName: "stop", command: "'/support/relay'", sourcePath: "/repo/hooks.json", currentHash: `sha256:${"f".repeat(64)}`, trustStatus: "untrusted" },
+      ] }] };
+    }));
+    await gateway.trust(["/repo"], "/support/relay", "/hooks.json");
+    expect(requests.find((request) => request.method === "config/batchWrite")?.params).toEqual({
+      edits: [{ keyPath: "hooks.state.\"/hooks.json:stop:0:0\".trusted_hash", value: `sha256:${"d".repeat(64)}`, mergeStrategy: "upsert" }],
+      reloadUserConfig: true,
+    });
   });
 
   it("interrupts the active App Server turn when a summary job is canceled", async () => {

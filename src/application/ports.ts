@@ -153,6 +153,7 @@ export interface SummarySearchResult {
 
 export interface HookInstallationStatus {
   readonly installed: boolean;
+  readonly trusted: boolean;
   readonly onboardingRequired: boolean;
   readonly relayPath: string;
   readonly configPath: string;
@@ -163,6 +164,15 @@ export interface HookInstallationStatus {
 export interface HookTrustState {
   readonly cwd: string;
   readonly status: "managed" | "trusted" | "untrusted" | "modified" | "unknown";
+  readonly hooks: readonly HookTrustCandidate[];
+}
+
+export interface HookTrustCandidate {
+  readonly key: string;
+  readonly eventName: string;
+  readonly command: string;
+  readonly currentHash: string;
+  readonly status: HookTrustState["status"];
 }
 
 export interface OwnedHookSpec { readonly command: string; readonly statusMessage: string; }
@@ -183,7 +193,8 @@ export interface HookRelayInstaller {
 }
 
 export interface HookTrustGateway {
-  inspect(cwds: readonly string[]): Promise<readonly HookTrustState[]>;
+  inspect(cwds: readonly string[], ownedCommand: string, ownedSourcePath: string): Promise<readonly HookTrustState[]>;
+  trust(cwds: readonly string[], ownedCommand: string, ownedSourcePath: string): Promise<void>;
 }
 
 export interface ApplicationSettings {
