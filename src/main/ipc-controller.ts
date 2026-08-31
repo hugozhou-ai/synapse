@@ -79,6 +79,7 @@ export class ElectronIpcController {
     this.handle("window:widget-drag-start", pointerPositionSchema, (pointer) => { this.windows.beginWidgetDrag(pointer); });
     this.handle("window:widget-drag-move", pointerPositionSchema, (pointer) => { this.windows.moveWidgetDrag(pointer); });
     this.handle("window:widget-drag-end", z.unknown(), () => { this.windows.endWidgetDrag(); });
+    this.handle("window:widget-dismiss", z.unknown(), () => { this.windows.dismissWidget(); });
   }
 
   private handle<Input, Output>(channel: string, schema: z.ZodType<Input>, action: (input: Input) => Promise<Output> | Output): void {

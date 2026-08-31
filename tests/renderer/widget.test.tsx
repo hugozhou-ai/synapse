@@ -54,6 +54,10 @@ describe("Widget summary actions", () => {
     act(() => widgetBlur());
     expect(screen.queryByText("Task")).toBeNull();
     expect(resizeWidget).toHaveBeenLastCalledWith({ width: 40, height: 40 });
+
+    await user.click(screen.getByRole("button", { name: "展开悬浮窗" }));
+    act(() => window.dispatchEvent(new Event("blur")));
+    expect(screen.queryByText("Task")).toBeNull();
   });
 
   it("previews the latest status change for three seconds without showing the full queue", async () => {

@@ -31,7 +31,7 @@ export class ElectronWindowManager {
     this.widget = this.createWindow({ width: collapsedBounds.width, height: collapsedBounds.height, transparent: true, backgroundColor: "#00000000", frame: false, resizable: false, skipTaskbar: true, alwaysOnTop: true });
     this.widget.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     this.widget.setAlwaysOnTop(true, "floating");
-    this.widget.on("blur", () => this.widget?.webContents.send("synapse:widget-blur"));
+    this.widget.on("blur", () => this.dismissWidget());
     this.placeWidget(settings.widgetPositions, settings.widgetDisplayId);
     await this.load(this.widget, "widget");
     if (settings.widgetVisible) this.widget.showInactive();
@@ -103,6 +103,8 @@ export class ElectronWindowManager {
   }
 
   endWidgetDrag(): void { this.widgetDragOrigin = null; }
+
+  dismissWidget(): void { this.widget?.webContents.send("synapse:widget-blur"); }
 
   private createWindow(options: Electron.BrowserWindowConstructorOptions): BrowserWindow {
     const window = new BrowserWindow({

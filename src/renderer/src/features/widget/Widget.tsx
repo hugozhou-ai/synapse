@@ -65,6 +65,11 @@ export function Widget() {
   useEffect(() => () => clearActivityTimer(), []);
   useEffect(() => window.synapse.window.onWidgetBlur(() => { if (mode === "expanded") collapse(); }), [mode]);
   useEffect(() => {
+    const handleWindowBlur = () => { if (mode === "expanded") collapse(); };
+    window.addEventListener("blur", handleWindowBlur);
+    return () => window.removeEventListener("blur", handleWindowBlur);
+  }, [mode]);
+  useEffect(() => {
     if (mode === "activity" && loaded && activitySession === null) collapse();
   }, [activitySession, loaded, mode]);
   const beginLogoDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {

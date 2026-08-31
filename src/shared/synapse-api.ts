@@ -55,6 +55,7 @@ export interface SynapseApi {
     beginWidgetDrag(pointer: { x: number; y: number }): Promise<void>;
     moveWidgetDrag(pointer: { x: number; y: number }): Promise<void>;
     endWidgetDrag(): Promise<void>;
+    dismissWidget(): Promise<void>;
     onWidgetBlur(listener: () => void): () => void;
     onSessionsChanged(listener: () => void): () => void;
     onNavigate(listener: (path: string) => void): () => void;

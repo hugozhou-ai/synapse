@@ -12,7 +12,7 @@ export function Workspace() {
   useEffect(() => window.synapse.window.onNavigate((path) => setRoute(parseWorkspaceRoute(path))), []);
   const summaryRoute = summaryWorkspaceRoute(route);
   const historyDocumentId = historyWorkspaceDocumentId(route);
-  return <div className="workspace-shell">
+  return <div className="workspace-shell" onPointerDownCapture={() => { void window.synapse.window.dismissWidget(); }}>
     <aside className="sidebar">
       <div className="brand"><div className="brand-icon"><SynapseLogo decorative /></div><div><strong>Synapse</strong><span>Local / Codex memory</span></div></div>
       <nav aria-label="主导航">
