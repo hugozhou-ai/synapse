@@ -34,6 +34,10 @@ export class ElectronIpcController {
       const result = await this.container.summaryGeneration.generateDraft({ ...value, publicationTarget: value.publicationTarget ? new PublicationTarget(value.publicationTarget.account, value.publicationTarget.folder) : null });
       this.windows.broadcastSessionsChanged(); return result;
     });
+    this.handle("summaries:generate-default", idSchema, async (id) => {
+      const result = await this.container.defaultSessionSummary.generate(id);
+      this.windows.broadcastSessionsChanged(); return result;
+    });
     this.handle("summaries:regenerate", regenerateSchema, (value) => this.container.summaryGeneration.regenerate(value));
     this.handle("summaries:update", z.object({ documentId: idSchema, content: summaryContentSchema }), (value) => this.container.summaryFinalization.updateDraft(value));
     this.handle("summaries:finalize", z.object({ documentId: idSchema, content: summaryContentSchema, syncToNotes: z.boolean() }), async (value) => {

@@ -48,7 +48,7 @@ export class ElectronWindowManager {
 
   async openQueue(): Promise<void> { await this.openWorkspace("queue"); }
 
-  async openSummary(sessionId: string): Promise<void> { await this.openWorkspace(`summary/${sessionId}`); }
+  async openSummary(sessionId: string): Promise<void> { await this.openWorkspace(`summary/quick/${sessionId}`); }
 
   private async openWorkspace(route: WorkspaceRoute): Promise<void> {
     if (!this.workspace || this.workspace.isDestroyed()) {

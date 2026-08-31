@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { Check, LoaderCircle, NotebookPen, RefreshCw, Sparkles, X } from "lucide-react";
 import type { ApplicationSettings } from "@application/ports";
@@ -10,7 +10,7 @@ import { useSummaryDraft } from "../../hooks/use-summary-draft";
 import { messageOf } from "../../lib/format";
 import { TurnSelector } from "./TurnSelector";
 
-export function SummaryComposer({ sessionId, onClose }: { sessionId: string; onClose(): void }) {
+export function SummaryComposer({ sessionId, autoGenerate = false, onClose }: { sessionId: string; autoGenerate?: boolean; onClose(): void }) {
   const [conversation, setConversation] = useState<ConversationTurnsView | null>(null);
   const [profiles, setProfiles] = useState<readonly SummaryProfileView[]>([]);
   const [settings, setSettings] = useState<ApplicationSettings | null>(null);
@@ -22,13 +22,21 @@ export function SummaryComposer({ sessionId, onClose }: { sessionId: string; onC
   const [notesTargets, setNotesTargets] = useState<NotesTargetsView | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const draft = useSummaryDraft();
+  const autoGenerationStarted = useRef(false);
 
   const loadConversation = useCallback(() => {
     void window.synapse.sessions.turns(sessionId).then((next) => {
       setConversation(next);
-      setSelected(new Set(next.turns.filter((turn) => turn.selectedByDefault).map((turn) => turn.id)));
+      setSelected(new Set(next.turns.filter((turn) => autoGenerate ? turn.status !== "running" : turn.selectedByDefault).map((turn) => turn.id)));
     }).catch((reason) => setLoadError(messageOf(reason)));
-  }, [sessionId]);
+  }, [autoGenerate, sessionId]);
+
+  useEffect(() => {
+    if (!autoGenerate || autoGenerationStarted.current) return;
+    autoGenerationStarted.current = true;
+    draft.beginGeneration();
+    void window.synapse.summaries.generateDefault(sessionId).then(draft.acceptGenerated).catch(draft.fail);
+  }, [autoGenerate, sessionId]);
 
   useEffect(() => {
     loadConversation();
@@ -41,9 +49,9 @@ export function SummaryComposer({ sessionId, onClose }: { sessionId: string; onC
   }, [loadConversation]);
 
   useEffect(() => {
-    if (!syncNotes || notesTargets) return;
+    if (autoGenerate || !syncNotes || notesTargets) return;
     void window.synapse.settings.notesTargets().then(setNotesTargets).catch((reason) => setLoadError(`无法读取 Apple Notes 目标：${messageOf(reason)}`));
-  }, [notesTargets, syncNotes]);
+  }, [autoGenerate, notesTargets, syncNotes]);
 
   const turns = conversation?.turns ?? [];
   const generate = async () => {
@@ -60,13 +68,14 @@ export function SummaryComposer({ sessionId, onClose }: { sessionId: string; onC
   };
   const busy = ["generating", "saving", "finalizing"].includes(draft.state.phase);
   const finalized = draft.state.phase === "final";
+  const showQuickProgress = autoGenerate && !draft.state.draft && !draft.state.error;
 
   return <div className="page composer-page">
-    <PageHeader eyebrow="SUMMARY HARNESS" title="整理会话" description="选择事实来源与整理方案。生成结果先保存为草稿，确认后才会成为不可变 final。" actions={<button className="ghost" onClick={onClose}><X size={16} />关闭</button>} />
+    <PageHeader eyebrow={autoGenerate ? "QUICK SUMMARY" : "SUMMARY HARNESS"} title={autoGenerate ? "快速整理" : "整理会话"} description={autoGenerate ? "正在使用默认方案整理整个 session。结果仍先保存为草稿，由你确认后成为不可变 final。" : "选择事实来源与整理方案。生成结果先保存为草稿，确认后才会成为不可变 final。"} actions={<button className="ghost" onClick={onClose}><X size={16} />关闭</button>} />
     {loadError && <ErrorBanner message={loadError} />}
     {draft.state.error && <ErrorBanner message={draft.state.error} />}
     {conversation && conversation.syncStatus !== "synced" && <div className="sync-message"><InfoBanner message={conversation.message ?? "Codex 会话尚未同步。"} /><button className="secondary" onClick={loadConversation}><RefreshCw size={14} />重新同步</button></div>}
-    {!draft.state.draft ? <div className="composer-grid">
+    {showQuickProgress ? <section className="panel quick-summary-state"><LoaderCircle className="spin" size={24} /><span className="eyebrow">DEFAULT PROFILE / FULL SESSION</span><h2>正在生成整理草稿</h2><p>正在同步全部 turns，并按默认方案提取事实、决策与后续行动。</p></section> : !draft.state.draft ? <div className="composer-grid">
       <section className="panel turns-panel"><div className="panel-head"><div><h2>选择 turns</h2><p>默认选中已完成 turn；失败或中断的 turn 需手动纳入。</p></div><div className="selection-actions"><button onClick={() => setSelected(new Set(turns.filter((turn) => turn.status !== "running").map((turn) => turn.id)))}>全选</button><button onClick={() => setSelected(new Set())}>取消</button></div></div>
         <TurnSelector turns={turns} selected={selected} onChange={setSelected} />
       </section>
@@ -77,7 +86,7 @@ export function SummaryComposer({ sessionId, onClose }: { sessionId: string; onC
         <div className="source-count"><strong>{selected.size}</strong><span>个 turns 将作为事实来源</span></div>
         <button className="primary wide" disabled={busy || conversation?.syncStatus !== "synced" || selected.size === 0 || !profileId || (syncNotes && !notesFolder.trim())} onClick={generate}>{draft.state.phase === "generating" ? <LoaderCircle className="spin" size={17} /> : <Sparkles size={17} />}生成草稿</button>
       </aside>
-    </div> : <DraftWorkspace state={draft.state} busy={busy} finalized={finalized} onEdit={draft.edit} onPreview={draft.setPreview} onSave={() => void draft.save()} onFinalize={() => void draft.finalize(syncNotes)} />}
+    </div> : <DraftWorkspace state={draft.state} busy={busy || !settings} finalized={finalized} onEdit={draft.edit} onPreview={draft.setPreview} onSave={() => void draft.save()} onFinalize={() => void draft.finalize(syncNotes)} />}
   </div>;
 }
 

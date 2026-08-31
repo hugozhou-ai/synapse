@@ -15,7 +15,7 @@ const api: SynapseApi = {
     listWidgetQueue: () => invoke("sessions:list"), turns: (id) => invoke("sessions:turns", id), ignore: (id) => invoke("sessions:ignore", id),
   },
   summaries: {
-    generate: (command) => invoke("summaries:generate", command), regenerate: (command) => invoke("summaries:regenerate", command), updateDraft: (command) => invoke("summaries:update", command),
+    generate: (command) => invoke("summaries:generate", command), generateDefault: (id) => invoke("summaries:generate-default", id), regenerate: (command) => invoke("summaries:regenerate", command), updateDraft: (command) => invoke("summaries:update", command),
     finalize: (command) => invoke("summaries:finalize", command), search: (query) => invoke("summaries:search", query),
     get: (id) => invoke("summaries:get", id), retryNotes: (id) => invoke("summaries:retry-notes", id),
   },

@@ -4,24 +4,24 @@ import { HistoryPage } from "../history/HistoryPage";
 import { QueuePage } from "../queue/QueuePage";
 import { SettingsPage } from "../settings/SettingsPage";
 import { SummaryComposer } from "../summary/SummaryComposer";
-import { parseWorkspaceRoute, type WorkspaceRoute } from "./workspace-route";
+import { parseWorkspaceRoute, summaryWorkspaceRoute, type WorkspaceRoute } from "./workspace-route";
 
 export function Workspace() {
   const [route, setRoute] = useState<WorkspaceRoute>(() => parseWorkspaceRoute(location.hash));
   useEffect(() => window.synapse.window.onNavigate((path) => setRoute(parseWorkspaceRoute(path))), []);
-  const sessionId = route.startsWith("summary/") ? route.slice(8) : null;
+  const summaryRoute = summaryWorkspaceRoute(route);
   return <div className="workspace-shell">
     <aside className="sidebar">
       <div className="brand"><div className="brand-icon"><Sparkles size={17} /></div><div><strong>Synapse</strong><span>Local / Codex memory</span></div></div>
       <nav aria-label="主导航">
-        <NavButton index="01" active={route === "queue" || Boolean(sessionId)} icon={<Archive size={17} />} label="任务队列" onClick={() => setRoute("queue")} />
+        <NavButton index="01" active={route === "queue" || Boolean(summaryRoute)} icon={<Archive size={17} />} label="任务队列" onClick={() => setRoute("queue")} />
         <NavButton index="02" active={route === "history"} icon={<History size={17} />} label="总结历史" onClick={() => setRoute("history")} />
         <NavButton index="03" active={route === "settings"} icon={<Settings size={17} />} label="设置" onClick={() => setRoute("settings")} />
       </nav>
       <div className="sidebar-foot"><span className="live-dot" /><span>LOCAL PROCESS<br />DATA STAYS HERE</span></div>
     </aside>
     <section className="content-shell">
-      {sessionId ? <SummaryComposer sessionId={sessionId} onClose={() => setRoute("queue")} /> : route === "queue" ? <QueuePage onSummarize={(id) => setRoute(`summary/${id}`)} onOpenSettings={() => setRoute("settings")} /> : route === "history" ? <HistoryPage /> : <SettingsPage />}
+      {summaryRoute ? <SummaryComposer key={route} sessionId={summaryRoute.sessionId} autoGenerate={summaryRoute.autoGenerate} onClose={() => setRoute("queue")} /> : route === "queue" ? <QueuePage onSummarize={(id) => setRoute(`summary/${id}`)} onOpenSettings={() => setRoute("settings")} /> : route === "history" ? <HistoryPage /> : <SettingsPage />}
     </section>
   </div>;
 }

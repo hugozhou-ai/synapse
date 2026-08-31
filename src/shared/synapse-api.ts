@@ -9,6 +9,7 @@ export interface SynapseApi {
   };
   summaries: {
     generate(command: GenerateSummaryCommand): Promise<SummaryDraft>;
+    generateDefault(sessionId: string): Promise<SummaryDraft>;
     regenerate(command: RegenerateSummaryCommand): Promise<SummaryDraft>;
     updateDraft(command: UpdateDraftCommand): Promise<SummaryDraft>;
     finalize(command: FinalizeSummaryCommand): Promise<FinalizedSummaryView>;

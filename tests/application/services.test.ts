@@ -3,11 +3,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { NodeSqliteSynapseDatabase } from "@infrastructure/sqlite/database";
-import { SqliteCodexSessionRepository, SqliteCodexTurnRepository, SqliteHookEventRepository, SqliteOutboxRepository, SqliteSummaryDocumentRepository, SqliteSummaryJobRepository, SqliteSummaryProfileRepository } from "@infrastructure/sqlite/repositories";
+import { SqliteCodexSessionRepository, SqliteCodexTurnRepository, SqliteHookEventRepository, SqliteOutboxRepository, SqliteSettingsRepository, SqliteSummaryDocumentRepository, SqliteSummaryJobRepository, SqliteSummaryProfileRepository } from "@infrastructure/sqlite/repositories";
 import { SqliteUnitOfWork } from "@infrastructure/sqlite/unit-of-work";
 import { ArbitraryTurnSelectionService, DefaultSessionLifecycleService, NormalizedTurnSummaryContextService } from "@domain/services";
 import { HookBasedSessionAwarenessService } from "@application/session-services";
-import { ProfileDrivenSummaryGenerationService, VersionedSummaryFinalizationService } from "@application/summary-services";
+import { DefaultProfileSessionSummaryService, ProfileDrivenSummaryGenerationService, VersionedSummaryFinalizationService } from "@application/summary-services";
+import type { GenerateSummaryCommand, SummaryDraft } from "@application/contracts";
 import { CodexSessionAggregate } from "@domain/session";
 import { PublicationTarget, SourceRevision, SummaryDocumentAggregate, SummaryProfile, SummaryVersion, TurnSelection } from "@domain/summary";
 import { NotesOutboxWorker } from "@infrastructure/notes/outbox-worker";
@@ -89,6 +90,34 @@ describe("application services", () => {
       expect(saved?.snapshot.profileId).toBe("new-profile");
       expect(saved?.snapshot.selection.turnIds).toEqual(["turn-2"]);
       expect(saved?.currentVersion?.props.sourceRevision.turnIds).toEqual(["turn-2"]);
+    } finally { database.close(); }
+  });
+
+  it("uses the default profile and every finished turn for one-click session summaries", async () => {
+    const { database } = await testDatabase();
+    try {
+      const sessions = new SqliteCodexSessionRepository(database); const turns = new SqliteCodexTurnRepository(database);
+      const profiles = new SqliteSummaryProfileRepository(database); const summaries = new SqliteSummaryDocumentRepository(database); const settings = new SqliteSettingsRepository(database);
+      const session = CodexSessionAggregate.create("session", "thread", "/repo", "a");
+      session.startTurn({ turnId: "turn-1", promptPreview: "one", at: "b" }); session.completeTurn({ turnId: "turn-1", assistantPreview: "done-one", at: "c" });
+      session.startTurn({ turnId: "turn-2", promptPreview: "two", at: "d" }); session.completeTurn({ turnId: "turn-2", assistantPreview: "failed-two", status: "failed", at: "e" });
+      await sessions.save(session); await turns.saveMany(session.id, session.turns);
+      await profiles.save(new SummaryProfile("other-profile", "Other", "systemPrompt", "Other rules", false));
+      await profiles.save(new SummaryProfile("default-profile", "Default", "systemPrompt", "Default rules", true));
+      await settings.save({ ...await settings.read(), summaryModel: "summary-model", syncNotesByDefault: true, notesAccount: "Work", notesFolder: "Synapse" });
+      let command: GenerateSummaryCommand | null = null;
+      const generated: SummaryDraft = { documentId: "doc", versionId: "version", content: { title: "Title", abstract: "", bodyMarkdown: "Body", tags: [] } };
+      const service = new DefaultProfileSessionSummaryService({
+        async generateDraft(value) { command = value; return generated; },
+        async regenerate() { throw new Error("not used"); },
+        async cancel() {},
+      }, sessions, profiles, settings, summaries);
+      expect(await service.generate("session")).toEqual(generated);
+      expect(command).toMatchObject({
+        sessionId: "session", selectedTurnIds: ["turn-1", "turn-2"], stopTurnId: "turn-2",
+        profileId: "default-profile", model: "summary-model", syncToNotes: true,
+        publicationTarget: { account: "Work", folder: "Synapse" },
+      });
     } finally { database.close(); }
   });
 });
