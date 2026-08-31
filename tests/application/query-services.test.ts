@@ -13,9 +13,11 @@ describe("RepositorySessionQueryService", () => {
       { async findById() { return session; }, async findByThreadId() { return session; }, async save() {}, async listWidgetQueue() { return [session]; }, async search() { return [session]; } },
       { now: () => "d" },
       { async findById() { return summary; }, async findLatestBySessionId() { return summary; }, async create() {}, async save() {}, async delete() {}, async search() { return { total: 0, items: [] }; } },
+      { async save() {}, async findById() { return null; }, async findActiveBySessionId() { return { id: "job", documentId: "document", status: "running" as const, error: null, coveredTurnIds: ["turn"], stageCoverage: [], createdAt: "c", updatedAt: "c" }; }, async failActive() {} },
     );
     const result = await service.getConversationTurns("session");
     expect(result.turns[0]?.promptPreview).toBe("prompt");
     expect((await service.listWidgetQueue())[0]?.summaryDocumentId).toBe("document");
+    expect((await service.listWidgetQueue())[0]?.summaryInProgress).toBe(true);
   });
 });

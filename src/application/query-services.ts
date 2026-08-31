@@ -1,5 +1,5 @@
 import { SummaryProfile } from "@domain/summary";
-import type { AgentModel, ApplicationSettings, ApplicationSettingsUpdate, AppServerRuntimeStatus, AppServerRuntimeStatusProvider, Clock, CodexSessionRepository, ExportGateway, IdGenerator, NotesTargetGateway, SettingsRepository, SummaryAgentGateway, SummaryDocumentRepository, SummaryProfileRepository, SummarySearchCriteria, SummarySearchResult, UnitOfWork } from "./ports";
+import type { AgentModel, ApplicationSettings, ApplicationSettingsUpdate, AppServerRuntimeStatus, AppServerRuntimeStatusProvider, Clock, CodexSessionRepository, ExportGateway, IdGenerator, NotesTargetGateway, SettingsRepository, SummaryAgentGateway, SummaryDocumentRepository, SummaryJobRepository, SummaryProfileRepository, SummarySearchCriteria, SummarySearchResult, UnitOfWork } from "./ports";
 import type { ConversationTurnsView, NotesTargetsView, SaveProfileCommand, SummaryDetailView, SummaryProfileView, WidgetSessionView } from "./contracts";
 import { DomainError } from "@domain/shared";
 
@@ -13,13 +13,17 @@ export class RepositorySessionQueryService implements SessionQueryService {
     private readonly sessions: CodexSessionRepository,
     private readonly clock: Clock,
     private readonly summaries: SummaryDocumentRepository,
+    private readonly jobs: SummaryJobRepository,
   ) {}
 
   async listWidgetQueue(): Promise<readonly WidgetSessionView[]> {
     const now = Date.parse(this.clock.now());
     return Promise.all((await this.sessions.listWidgetQueue()).map(async (session) => {
       const lastTurn = session.turns.at(-1);
-      const summary = await this.summaries.findLatestBySessionId(session.id);
+      const [summary, activeJob] = await Promise.all([
+        this.summaries.findLatestBySessionId(session.id),
+        this.jobs.findActiveBySessionId(session.id),
+      ]);
       return {
         id: session.id,
         threadId: session.threadId,
@@ -30,6 +34,7 @@ export class RepositorySessionQueryService implements SessionQueryService {
         elapsedSeconds: Math.max(0, Math.floor(((lastTurn?.props.completedAt ? Date.parse(lastTurn.props.completedAt) : now) - Date.parse(lastTurn?.props.startedAt ?? session.snapshot.lastEventAt)) / 1000)),
         lastCompletedTurnId: session.snapshot.lastCompletedTurnId,
         summaryDocumentId: summary?.currentVersion ? summary.id : null,
+        summaryInProgress: activeJob !== null,
       };
     }));
   }

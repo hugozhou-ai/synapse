@@ -33,8 +33,7 @@ export class ElectronIpcController {
     this.handle("sessions:turns", idSchema, (id) => this.container.sessionQueries.getConversationTurns(id));
     this.handle("sessions:ignore", idSchema, async (id) => { await this.container.sessionAwareness.ignore(id); this.windows.broadcastSessionsChanged(); });
     this.handle("summaries:generate", generateSchema, async (value) => {
-      const result = await this.container.summaryGeneration.generateDraft({ ...value, publicationTarget: value.publicationTarget ? new PublicationTarget(value.publicationTarget.account, value.publicationTarget.folder) : null });
-      this.windows.broadcastSessionsChanged(); return result;
+      return this.container.summaryGeneration.generateDraft({ ...value, publicationTarget: value.publicationTarget ? new PublicationTarget(value.publicationTarget.account, value.publicationTarget.folder) : null });
     });
     this.handle("summaries:regenerate", regenerateSchema, (value) => this.container.summaryGeneration.regenerate(value));
     this.handle("summaries:update", z.object({ documentId: idSchema, content: summaryContentSchema }), (value) => this.container.summaryFinalization.updateDraft(value));

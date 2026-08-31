@@ -63,6 +63,7 @@ export class ElectronApplicationContainer {
     const outbox = new SqliteOutboxRepository(database);
     const settingsRepository = new SqliteSettingsRepository(database);
     const unitOfWork = new SqliteUnitOfWork(database);
+    await jobs.failActive("Summary generation was interrupted because Synapse restarted.", clock.now());
 
     const awareness = new HookBasedSessionAwarenessService(new DefaultSessionLifecycleService(), sessions, turns, hookEvents, outbox, unitOfWork, clock, ids);
     const settingsValue = await settingsRepository.read();
@@ -70,7 +71,7 @@ export class ElectronApplicationContainer {
     appServer.start();
     const summaryGeneration = new ProfileDrivenSummaryGenerationService(
       new ArbitraryTurnSelectionService(), new NormalizedTurnSummaryContextService(new NodeContentHashService()),
-      appServer, profiles, summaries, sessions, jobs, unitOfWork, clock, ids,
+      appServer, profiles, summaries, sessions, jobs, unitOfWork, clock, ids, onSessionsChanged,
     );
     const finalization = new VersionedSummaryFinalizationService(summaries, sessions, outbox, unitOfWork, clock, ids);
     const notesScript = resourcePath(app, "apple-notes-publisher.jxa");
@@ -91,7 +92,7 @@ export class ElectronApplicationContainer {
 
     const services = {
       sessionAwareness: awareness,
-      sessionQueries: new RepositorySessionQueryService(sessions, clock, summaries),
+      sessionQueries: new RepositorySessionQueryService(sessions, clock, summaries, jobs),
       summaryQueries: new RepositorySummaryQueryService(summaries),
       summaryGeneration,
       summaryDeletion: new TransactionalSummaryDeletionService(summaries, sessions, outbox, unitOfWork),

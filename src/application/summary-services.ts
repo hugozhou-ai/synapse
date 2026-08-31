@@ -58,6 +58,7 @@ export class ProfileDrivenSummaryGenerationService implements SummaryGenerationS
     private readonly unitOfWork: UnitOfWork,
     private readonly clock: Clock,
     private readonly ids: IdGenerator,
+    private readonly onJobsChanged: () => void,
   ) {}
 
   async generateDraft(command: GenerateSummaryCommand): Promise<SummaryDraft> {
@@ -74,9 +75,13 @@ export class ProfileDrivenSummaryGenerationService implements SummaryGenerationS
     });
     const jobId = this.ids.next();
     await this.unitOfWork.execute(async () => {
+      if (await this.jobs.findActiveBySessionId(session.id)) {
+        throw new DomainError("SUMMARY_ALREADY_RUNNING", "该会话正在生成总结，请等待完成。");
+      }
       await this.summaries.create(document);
       await this.jobs.save({ id: jobId, documentId: document.id, status: "running", error: null, coveredTurnIds: context.sourceTurnIds, stageCoverage: [], createdAt: now, updatedAt: now });
     });
+    this.onJobsChanged();
     return this.runAgent(document, profile, context, jobId, command.model);
   }
 
@@ -89,14 +94,23 @@ export class ProfileDrivenSummaryGenerationService implements SummaryGenerationS
     const selection = this.selections.create(session.turns, command.selectedTurnIds);
     const context = await this.contexts.build(toStoredConversation(session), selection);
     const jobId = this.ids.next(); const now = this.clock.now();
-    await this.jobs.save({ id: jobId, documentId: document.id, status: "running", error: null, coveredTurnIds: context.sourceTurnIds, stageCoverage: [], createdAt: now, updatedAt: now });
+    await this.unitOfWork.execute(async () => {
+      if (await this.jobs.findActiveBySessionId(session.id)) {
+        throw new DomainError("SUMMARY_ALREADY_RUNNING", "该会话正在生成总结，请等待完成。");
+      }
+      await this.jobs.save({ id: jobId, documentId: document.id, status: "running", error: null, coveredTurnIds: context.sourceTurnIds, stageCoverage: [], createdAt: now, updatedAt: now });
+    });
+    this.onJobsChanged();
     return this.runAgent(document, profile, context, jobId, command.model, selection);
   }
 
   async cancel(jobId: string): Promise<void> {
     await this.agent.cancel(jobId);
     const job = await this.jobs.findById(jobId);
-    if (job) await this.jobs.save({ ...job, status: "canceled", updatedAt: this.clock.now() });
+    if (job) {
+      await this.jobs.save({ ...job, status: "canceled", updatedAt: this.clock.now() });
+      this.onJobsChanged();
+    }
   }
 
   private async runAgent(
@@ -122,10 +136,12 @@ export class ProfileDrivenSummaryGenerationService implements SummaryGenerationS
         const job = await this.jobs.findById(jobId);
         if (job) await this.jobs.save({ ...job, status: "succeeded", stageCoverage: generated.stages, updatedAt: now });
       });
+      this.onJobsChanged();
       return { documentId: document.id, versionId: version.props.id, content: version.props.content };
     } catch (error) {
       const job = await this.jobs.findById(jobId);
       if (job) await this.jobs.save({ ...job, status: "failed", error: error instanceof Error ? error.message : String(error), updatedAt: this.clock.now() });
+      this.onJobsChanged();
       throw error;
     }
   }

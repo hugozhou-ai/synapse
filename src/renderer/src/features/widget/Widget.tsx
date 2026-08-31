@@ -23,7 +23,7 @@ export function Widget() {
   const logoDrag = useRef<LogoDragState | null>(null);
   const suppressLogoClick = useRef(false);
   const running = sessions.filter((session) => session.status === "running").length;
-  const ready = sessions.filter((session) => session.status === "ready").length;
+  const ready = sessions.filter((session) => session.status === "ready" && !session.summaryInProgress).length;
   const hooksReady = hooks?.installed === true && hooks.trusted;
   const activitySession = activitySessionId === null ? null : sessions.find((session) => session.id === activitySessionId) ?? null;
   const clearActivityTimer = () => {
@@ -116,7 +116,7 @@ function SessionMiniCard({ session }: { session: WidgetSessionView }) {
     <div className={`status-orb ${session.status}`}>{session.status === "running" ? <LoaderCircle size={14} /> : <Check size={14} />}</div>
     <div className="mini-main"><strong>{session.title}</strong><span>{shortPath(session.cwd)} · {formatDuration(session.elapsedSeconds)}</span></div>
     {session.status === "ready" && <div className="mini-actions">
-      <button className="primary tiny mini-summary" aria-label="总结" onClick={() => window.synapse.window.openSummary(session.id)}>总结</button>
+      <button className="primary tiny mini-summary" aria-label={session.summaryInProgress ? "总结中" : "总结"} disabled={session.summaryInProgress} onClick={() => window.synapse.window.openSummary(session.id)}>{session.summaryInProgress ? <LoaderCircle className="spin" size={14} /> : "总结"}</button>
       {session.summaryDocumentId && <button className="mini-result-link" aria-label="打开整理结果" title="打开整理结果" onClick={() => window.synapse.window.openSummaryResult(session.summaryDocumentId!)}><ArrowUpRight size={15} /></button>}
     </div>}
   </article>;

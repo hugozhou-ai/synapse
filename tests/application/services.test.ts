@@ -33,6 +33,38 @@ describe("application services", () => {
     } finally { database.close(); }
   });
 
+  it("publishes summary job state changes and rejects concurrent generation for one session", async () => {
+    const { database } = await testDatabase();
+    try {
+      const sessions = new SqliteCodexSessionRepository(database); const turns = new SqliteCodexTurnRepository(database);
+      const profiles = new SqliteSummaryProfileRepository(database); const summaries = new SqliteSummaryDocumentRepository(database); const jobs = new SqliteSummaryJobRepository(database);
+      const session = CodexSessionAggregate.create("session", "thread", "/repo", "a");
+      session.startTurn({ turnId: "turn", promptContent: "prompt", at: "b" }); session.completeTurn({ turnId: "turn", assistantContent: "done", at: "c" });
+      await sessions.save(session); await turns.saveMany(session.id, session.turns);
+      const profile = (await profiles.list())[0]!;
+      let releaseAgent: () => void = () => undefined; let markAgentStarted: () => void = () => undefined;
+      const agentStarted = new Promise<void>((resolveStarted) => { markAgentStarted = resolveStarted; });
+      let id = 0; let changes = 0;
+      const service = new ProfileDrivenSummaryGenerationService(
+        new ArbitraryTurnSelectionService(), new NormalizedTurnSummaryContextService(new NodeContentHashService()),
+        { async generate() { await new Promise<void>((resolveAgent) => { releaseAgent = resolveAgent; markAgentStarted(); }); return { title: "Title", abstract: "", bodyMarkdown: "Body", tags: [], model: null, stages: [{ kind: "final", turnIds: ["turn"] }] }; }, async cancel() {}, async listModels() { return []; } },
+        profiles, summaries, sessions, jobs, new SqliteUnitOfWork(database), { now: () => "d" }, { next: () => `job-state-${++id}` }, () => { changes += 1; },
+      );
+      const command = { sessionId: "session", selectedTurnIds: ["turn"], profileId: profile.id, model: null, syncToNotes: false, publicationTarget: null };
+      const generation = service.generateDraft(command);
+      await agentStarted;
+
+      expect((await jobs.findActiveBySessionId("session"))?.status).toBe("running");
+      expect(changes).toBe(1);
+      await expect(service.generateDraft(command)).rejects.toMatchObject({ code: "SUMMARY_ALREADY_RUNNING" });
+
+      releaseAgent();
+      await generation;
+      expect(await jobs.findActiveBySessionId("session")).toBeNull();
+      expect(changes).toBe(2);
+    } finally { database.close(); }
+  });
+
   it("creates an immutable final, summarizes the source session, and enqueues Notes after the transaction", async () => {
     const { database } = await testDatabase();
     try {
@@ -111,7 +143,7 @@ describe("application services", () => {
       const service = new ProfileDrivenSummaryGenerationService(
         new ArbitraryTurnSelectionService(), new NormalizedTurnSummaryContextService(new NodeContentHashService()),
         { async generate(request) { source = request.context.chunks[0]?.content ?? ""; return { title: "New", abstract: "", bodyMarkdown: "Body", tags: [], model: null, stages: [{ kind: "final", turnIds: ["turn-2"] }] }; }, async cancel() {}, async listModels() { return []; } },
-        profiles, summaries, sessions, jobs, new SqliteUnitOfWork(database), { now: () => "g" }, { next: () => `generated-${++id}` },
+        profiles, summaries, sessions, jobs, new SqliteUnitOfWork(database), { now: () => "g" }, { next: () => `generated-${++id}` }, () => undefined,
       );
       await service.regenerate({ documentId: "doc", selectedTurnIds: ["turn-2"], profileId: "new-profile", model: null });
       const saved = await summaries.findById("doc");

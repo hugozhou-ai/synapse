@@ -30,6 +30,8 @@ export interface SummaryJob {
 export interface SummaryJobRepository {
   save(job: SummaryJob): Promise<void>;
   findById(id: string): Promise<SummaryJob | null>;
+  findActiveBySessionId(sessionId: string): Promise<SummaryJob | null>;
+  failActive(error: string, updatedAt: string): Promise<void>;
 }
 
 export interface PublicationRecord {

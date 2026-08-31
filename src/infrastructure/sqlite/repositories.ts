@@ -264,9 +264,34 @@ export class SqliteSummaryJobRepository implements SummaryJobRepository {
   async findById(id: string): Promise<SummaryJob | null> {
     return this.db.execute(() => {
       const row = this.db.connection.prepare("SELECT * FROM summary_jobs WHERE id = ?").get(id) as Row | undefined;
-      return row ? { id: String(row.id), documentId: String(row.document_id), status: String(row.status) as SummaryJob["status"], error: row.error === null ? null : String(row.error), coveredTurnIds: parseJson<string[]>(row.covered_turn_ids_json), stageCoverage: parseJson<SummaryJob["stageCoverage"]>(row.stage_coverage_json), createdAt: String(row.created_at), updatedAt: String(row.updated_at) } : null;
+      return row ? mapSummaryJob(row) : null;
     });
   }
+
+  async findActiveBySessionId(sessionId: string): Promise<SummaryJob | null> {
+    return this.db.execute(() => {
+      const row = this.db.connection.prepare(`SELECT j.* FROM summary_jobs j
+        JOIN summary_documents d ON d.id = j.document_id
+        WHERE d.session_id = ? AND j.status IN ('queued','running')
+        ORDER BY j.created_at DESC LIMIT 1`).get(sessionId) as Row | undefined;
+      return row ? mapSummaryJob(row) : null;
+    });
+  }
+
+  async failActive(error: string, updatedAt: string): Promise<void> {
+    await this.db.execute(() => {
+      this.db.connection.prepare("UPDATE summary_jobs SET status = 'failed', error = ?, updated_at = ? WHERE status IN ('queued','running')")
+        .run(error, updatedAt);
+    });
+  }
+}
+
+function mapSummaryJob(row: Row): SummaryJob {
+  return {
+    id: String(row.id), documentId: String(row.document_id), status: String(row.status) as SummaryJob["status"],
+    error: row.error === null ? null : String(row.error), coveredTurnIds: parseJson<string[]>(row.covered_turn_ids_json),
+    stageCoverage: parseJson<SummaryJob["stageCoverage"]>(row.stage_coverage_json), createdAt: String(row.created_at), updatedAt: String(row.updated_at),
+  };
 }
 
 export class SqlitePublicationRepository implements PublicationRepository {

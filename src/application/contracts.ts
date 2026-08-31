@@ -69,6 +69,7 @@ export interface WidgetSessionView {
   readonly elapsedSeconds: number;
   readonly lastCompletedTurnId: string | null;
   readonly summaryDocumentId: string | null;
+  readonly summaryInProgress: boolean;
 }
 
 export interface TurnSelectionView {

@@ -4,7 +4,7 @@ import { findLatestSessionStatusChange, snapshotSessionStatuses } from "../../sr
 
 const session = (id: string, status: string, elapsedSeconds = 1): WidgetSessionView => ({
   id, threadId: id, title: id, cwd: "/repo", status, promptPreview: "", elapsedSeconds,
-  lastCompletedTurnId: null, summaryDocumentId: null,
+  lastCompletedTurnId: null, summaryDocumentId: null, summaryInProgress: false,
 });
 
 describe("widget activity detection", () => {

@@ -11,7 +11,7 @@ describe("Widget summary actions", () => {
   it("opens manual summary composition and keeps the existing result link", async () => {
     const session: WidgetSessionView = {
       id: "session", threadId: "thread", title: "Task", cwd: "/repo", status: "ready",
-      promptPreview: "prompt", elapsedSeconds: 10, lastCompletedTurnId: "turn", summaryDocumentId: "document",
+      promptPreview: "prompt", elapsedSeconds: 10, lastCompletedTurnId: "turn", summaryDocumentId: "document", summaryInProgress: false,
     };
     const openSummary = vi.fn();
     const openSummaryResult = vi.fn();
@@ -53,7 +53,7 @@ describe("Widget summary actions", () => {
     vi.useFakeTimers();
     let sessions: readonly WidgetSessionView[] = [{
       id: "session", threadId: "thread", title: "Latest task", cwd: "/repo", status: "running",
-      promptPreview: "prompt", elapsedSeconds: 10, lastCompletedTurnId: null, summaryDocumentId: null,
+      promptPreview: "prompt", elapsedSeconds: 10, lastCompletedTurnId: null, summaryDocumentId: null, summaryInProgress: false,
     }];
     let sessionsChanged: () => void = () => undefined;
     const resizeWidget = vi.fn();
@@ -82,6 +82,26 @@ describe("Widget summary actions", () => {
     await act(async () => { vi.advanceTimersByTime(3_000); });
     expect(screen.queryByText("Latest task")).toBeNull();
     expect(resizeWidget).toHaveBeenLastCalledWith({ width: 40, height: 40 });
+  });
+
+  it("shows a disabled loading action while the source session is being summarized", async () => {
+    const session: WidgetSessionView = {
+      id: "session", threadId: "thread", title: "Task", cwd: "/repo", status: "ready",
+      promptPreview: "prompt", elapsedSeconds: 10, lastCompletedTurnId: "turn", summaryDocumentId: null, summaryInProgress: true,
+    };
+    Object.defineProperty(window, "synapse", { configurable: true, value: {
+      sessions: { listWidgetQueue: vi.fn(async () => [session]), ignore: vi.fn(), turns: vi.fn() }, summaries: {},
+      hooks: { inspect: vi.fn().mockResolvedValue({ installed: true, trusted: true, onboardingRequired: false, relayPath: "/relay", configPath: "/hooks", message: null, trustStates: [] }) },
+      window: {
+        resizeWidget: vi.fn(), openSettings: vi.fn(), openHistory: vi.fn(), openSummary: vi.fn(), openSummaryResult: vi.fn(),
+        beginWidgetDrag: vi.fn(), moveWidgetDrag: vi.fn(), endWidgetDrag: vi.fn(), onWidgetBlur: vi.fn(() => () => undefined),
+        onSessionsChanged: vi.fn(() => () => undefined), onNavigate: vi.fn(() => () => undefined),
+      },
+    } });
+
+    render(<Widget />);
+    await userEvent.setup().click(screen.getByRole("button", { name: "展开悬浮窗" }));
+    expect((await screen.findByRole("button", { name: "总结中" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("drags the collapsed logo without starting image drag or opening the full widget", () => {
