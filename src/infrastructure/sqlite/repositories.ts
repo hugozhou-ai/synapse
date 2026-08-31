@@ -6,6 +6,7 @@ import type {
   SummaryProfileRepository, SummarySearchCriteria, SummarySearchResult,
 } from "@application/ports";
 import type { SQLInputValue } from "node:sqlite";
+import { DomainError } from "@domain/shared";
 import type { SynapseDatabase } from "./database";
 
 type Row = Record<string, unknown>;
@@ -85,7 +86,7 @@ export class SqliteCodexSessionRepository implements CodexSessionRepository {
 function mapTurn(row: Row): CodexTurn {
   return new CodexTurn({
     id: String(row.id), sequence: Number(row.sequence), status: String(row.status) as TurnStatus,
-    promptPreview: String(row.prompt_preview), assistantPreview: String(row.assistant_preview),
+    promptContent: String(row.prompt_content), assistantContent: String(row.assistant_content),
     startedAt: String(row.started_at), completedAt: row.completed_at === null ? null : String(row.completed_at),
   });
 }
@@ -95,16 +96,13 @@ export class SqliteCodexTurnRepository implements CodexTurnRepository {
   async saveMany(sessionId: string, turns: readonly CodexTurn[]): Promise<void> {
     await this.db.execute(() => {
       const statement = this.db.connection.prepare(`
-      INSERT INTO codex_turns(id,session_id,sequence,status,prompt_preview,assistant_preview,started_at,completed_at)
-      VALUES (@id,@sessionId,@sequence,@status,@promptPreview,@assistantPreview,@startedAt,@completedAt)
-      ON CONFLICT(session_id,id) DO UPDATE SET sequence=excluded.sequence,status=excluded.status,prompt_preview=excluded.prompt_preview,
-        assistant_preview=excluded.assistant_preview,started_at=excluded.started_at,completed_at=excluded.completed_at
+      INSERT INTO codex_turns(id,session_id,sequence,status,prompt_content,assistant_content,started_at,completed_at)
+      VALUES (@id,@sessionId,@sequence,@status,@promptContent,@assistantContent,@startedAt,@completedAt)
+      ON CONFLICT(session_id,id) DO UPDATE SET sequence=excluded.sequence,status=excluded.status,prompt_content=excluded.prompt_content,
+        assistant_content=excluded.assistant_content,started_at=excluded.started_at,completed_at=excluded.completed_at
     `);
       for (const turn of turns) statement.run({ ...turn.props, sessionId });
     });
-  }
-  async listBySessionId(sessionId: string): Promise<readonly CodexTurn[]> {
-    return this.db.execute(() => (this.db.connection.prepare("SELECT * FROM codex_turns WHERE session_id = ? ORDER BY sequence").all(sessionId) as Row[]).map(mapTurn));
   }
 }
 
@@ -149,27 +147,39 @@ function mapProfile(row: Row): SummaryProfile {
 export class SqliteSummaryDocumentRepository implements SummaryDocumentRepository {
   constructor(private readonly db: SynapseDatabase) {}
   async findById(id: string): Promise<SummaryDocumentAggregate | null> { return this.db.execute(() => this.find("d.id = ?", id)); }
-  async findLatestBySessionId(id: string): Promise<SummaryDocumentAggregate | null> { return this.db.execute(() => this.find("d.session_id = ? ORDER BY d.updated_at DESC", id)); }
+  async findLatestBySessionId(id: string): Promise<SummaryDocumentAggregate | null> { return this.db.execute(() => this.find("d.session_id = ? AND d.current_version_id IS NOT NULL ORDER BY d.updated_at DESC", id)); }
 
-  async save(document: SummaryDocumentAggregate): Promise<void> {
+  async create(document: SummaryDocumentAggregate): Promise<void> {
     await this.db.execute(() => {
       const p = document.snapshot;
       this.db.connection.prepare(`
       INSERT INTO summary_documents(id,session_id,profile_id,selected_turn_ids_json,current_version_id,notes_account,notes_folder,publication_status,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET profile_id=excluded.profile_id,selected_turn_ids_json=excluded.selected_turn_ids_json,
-        current_version_id=excluded.current_version_id,notes_account=excluded.notes_account,notes_folder=excluded.notes_folder,
-        publication_status=excluded.publication_status,updated_at=excluded.updated_at
+      VALUES (?,?,?,?,?,?,?,?,?,?)
       `).run(p.id, p.sessionId, p.profileId, JSON.stringify(p.selection.turnIds), p.currentVersionId, p.publicationTarget?.account ?? null, p.publicationTarget?.folder ?? null, p.publicationStatus, p.createdAt, p.updatedAt);
-      const insertVersion = this.db.connection.prepare(`
-      INSERT OR IGNORE INTO summary_versions(id,document_id,sequence,kind,title,abstract,body_markdown,tags_json,source_turn_ids_json,source_hash,model,output_json,created_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-      `);
-      for (const version of p.versions) {
-        const v = version.props;
-        insertVersion.run(v.id, v.documentId, v.sequence, v.kind, v.content.title, v.content.abstract, v.content.bodyMarkdown,
-          JSON.stringify(v.content.tags), JSON.stringify(v.sourceRevision.turnIds), v.sourceRevision.contentHash, v.model, JSON.stringify(v.content), v.createdAt);
-      }
+      this.insertVersions(document);
       if (p.currentVersionId) this.refreshFts(document);
+    });
+  }
+
+  async save(document: SummaryDocumentAggregate): Promise<void> {
+    await this.db.execute(() => {
+      const p = document.snapshot;
+      const result = this.db.connection.prepare(`
+      UPDATE summary_documents SET profile_id=?,selected_turn_ids_json=?,current_version_id=?,notes_account=?,notes_folder=?,publication_status=?,updated_at=?
+      WHERE id=?
+      `).run(p.profileId, JSON.stringify(p.selection.turnIds), p.currentVersionId, p.publicationTarget?.account ?? null, p.publicationTarget?.folder ?? null, p.publicationStatus, p.updatedAt, p.id);
+      if (Number(result.changes) === 0) throw new DomainError("SUMMARY_NOT_FOUND", "Summary document does not exist.");
+      this.insertVersions(document);
+      if (p.currentVersionId) this.refreshFts(document);
+      else this.db.connection.prepare("DELETE FROM summary_fts WHERE document_id = ?").run(document.id);
+    });
+  }
+
+  async delete(id: string): Promise<void> {
+    await this.db.execute(() => {
+      this.db.connection.prepare("DELETE FROM summary_fts WHERE document_id = ?").run(id);
+      const result = this.db.connection.prepare("DELETE FROM summary_documents WHERE id = ?").run(id);
+      if (Number(result.changes) === 0) throw new DomainError("SUMMARY_NOT_FOUND", "Summary document does not exist.");
     });
   }
 
@@ -206,6 +216,18 @@ export class SqliteSummaryDocumentRepository implements SummaryDocumentRepositor
       publicationStatus: String(row.publication_status) as PublicationStatus,
       createdAt: String(row.created_at), updatedAt: String(row.updated_at),
     });
+  }
+
+  private insertVersions(document: SummaryDocumentAggregate): void {
+    const insertVersion = this.db.connection.prepare(`
+    INSERT OR IGNORE INTO summary_versions(id,document_id,sequence,kind,title,abstract,body_markdown,tags_json,source_turn_ids_json,source_hash,model,output_json,created_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `);
+    for (const version of document.snapshot.versions) {
+      const v = version.props;
+      insertVersion.run(v.id, v.documentId, v.sequence, v.kind, v.content.title, v.content.abstract, v.content.bodyMarkdown,
+        JSON.stringify(v.content.tags), JSON.stringify(v.sourceRevision.turnIds), v.sourceRevision.contentHash, v.model, JSON.stringify(v.content), v.createdAt);
+    }
   }
 
   private refreshFts(document: SummaryDocumentAggregate): void {
@@ -281,6 +303,9 @@ export class SqliteOutboxRepository implements OutboxRepository {
   async markFailed(id: string, error: string): Promise<void> { await this.db.execute(() => { this.db.connection.prepare("UPDATE outbox SET attempts = attempts + 1, last_error = ? WHERE id = ?").run(error, id); }); }
   async markAggregateProcessed(kind: OutboxMessage["kind"], aggregateId: string, at: string): Promise<void> {
     await this.db.execute(() => { this.db.connection.prepare("UPDATE outbox SET processed_at = ?, last_error = NULL WHERE kind = ? AND aggregate_id = ? AND processed_at IS NULL").run(at, kind, aggregateId); });
+  }
+  async deleteAggregate(kind: OutboxMessage["kind"], aggregateId: string): Promise<void> {
+    await this.db.execute(() => { this.db.connection.prepare("DELETE FROM outbox WHERE kind = ? AND aggregate_id = ?").run(kind, aggregateId); });
   }
 }
 

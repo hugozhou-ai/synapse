@@ -23,12 +23,12 @@ export class CodexHookProtocolMapper {
       turnId: raw.turn_id ?? null,
       cwd: raw.cwd,
       model: raw.model ?? null,
-      promptPreview: preview(raw.prompt ?? ""),
-      assistantPreview: preview(raw.last_assistant_message ?? ""),
+      promptContent: normalize(raw.prompt ?? ""),
+      assistantContent: normalize(raw.last_assistant_message ?? ""),
       occurredAt: new Date().toISOString(),
       payloadHash,
     };
   }
 }
 
-function preview(value: string): string { return value.replaceAll(/\s+/g, " ").trim().slice(0, 280); }
+function normalize(value: string): string { return value.replaceAll("\r\n", "\n").trim(); }

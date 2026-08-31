@@ -17,6 +17,16 @@ const directories: string[] = [];
 afterEach(async () => { for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true }); });
 
 describe("codex-hook-relay", () => {
+  it("keeps complete prompt and assistant content for local summary generation", () => {
+    const prompt = `目标\n${"细节".repeat(400)}`;
+    const assistant = `结果\r\n${"证据".repeat(400)}`;
+    const event = new CodexHookProtocolMapper().map(JSON.stringify({
+      hook_event_name: "Stop", session_id: "session", turn_id: "turn", prompt, last_assistant_message: assistant,
+    }));
+    expect(event.promptContent).toBe(prompt);
+    expect(event.assistantContent).toBe(assistant.replaceAll("\r\n", "\n"));
+  });
+
   it("fails open and spools a 0600 payload while the app is offline", async () => {
     const support = await mkdtemp(join(tmpdir(), "synapse-relay-offline-")); directories.push(support);
     const payload = JSON.stringify({ hook_event_name: "Stop", session_id: "线程-一", turn_id: "turn-1", cwd: "/tmp/项目", last_assistant_message: "完成" });

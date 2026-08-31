@@ -1,5 +1,5 @@
 import { SummaryProfile } from "@domain/summary";
-import type { AgentModel, ApplicationSettings, ApplicationSettingsUpdate, AppServerRuntimeStatus, AppServerRuntimeStatusProvider, Clock, CodexSessionRepository, CodexTurnRepository, ConversationGateway, ExportGateway, IdGenerator, NotesTargetGateway, SettingsRepository, SummaryAgentGateway, SummaryDocumentRepository, SummaryProfileRepository, SummarySearchCriteria, SummarySearchResult, UnitOfWork } from "./ports";
+import type { AgentModel, ApplicationSettings, ApplicationSettingsUpdate, AppServerRuntimeStatus, AppServerRuntimeStatusProvider, Clock, CodexSessionRepository, ExportGateway, IdGenerator, NotesTargetGateway, SettingsRepository, SummaryAgentGateway, SummaryDocumentRepository, SummaryProfileRepository, SummarySearchCriteria, SummarySearchResult, UnitOfWork } from "./ports";
 import type { ConversationTurnsView, NotesTargetsView, SaveProfileCommand, SummaryDetailView, SummaryProfileView, WidgetSessionView } from "./contracts";
 import { DomainError } from "@domain/shared";
 
@@ -11,60 +11,38 @@ export interface SessionQueryService {
 export class RepositorySessionQueryService implements SessionQueryService {
   constructor(
     private readonly sessions: CodexSessionRepository,
-    private readonly turns: CodexTurnRepository,
     private readonly clock: Clock,
-    private readonly conversations?: ConversationGateway,
+    private readonly summaries: SummaryDocumentRepository,
   ) {}
 
   async listWidgetQueue(): Promise<readonly WidgetSessionView[]> {
     const now = Date.parse(this.clock.now());
-    return (await this.sessions.listWidgetQueue()).map((session) => {
+    return Promise.all((await this.sessions.listWidgetQueue()).map(async (session) => {
       const lastTurn = session.turns.at(-1);
+      const summary = await this.summaries.findLatestBySessionId(session.id);
       return {
         id: session.id,
         threadId: session.threadId,
-        title: session.snapshot.title ?? lastTurn?.props.promptPreview ?? "未命名任务",
+        title: session.snapshot.title || preview(lastTurn?.props.promptContent ?? "") || "未命名任务",
         cwd: session.snapshot.cwd,
         status: session.status,
-        promptPreview: lastTurn?.props.promptPreview ?? "",
+        promptPreview: preview(lastTurn?.props.promptContent ?? ""),
         elapsedSeconds: Math.max(0, Math.floor(((lastTurn?.props.completedAt ? Date.parse(lastTurn.props.completedAt) : now) - Date.parse(lastTurn?.props.startedAt ?? session.snapshot.lastEventAt)) / 1000)),
         lastCompletedTurnId: session.snapshot.lastCompletedTurnId,
+        summaryDocumentId: summary?.currentVersion ? summary.id : null,
       };
-    });
+    }));
   }
 
   async getConversationTurns(sessionId: string): Promise<ConversationTurnsView> {
     const session = await this.sessions.findById(sessionId);
-    let synchronization: Pick<ConversationTurnsView, "syncStatus" | "message"> = { syncStatus: "pending", message: "Codex 会话仍在同步，当前展示 Hook 缓存。" };
-    if (session && this.conversations) {
-      try {
-        const conversation = session.snapshot.lastCompletedTurnId
-          ? await this.conversations.waitUntilTurnPersisted(session.threadId, session.snapshot.lastCompletedTurnId)
-          : await this.conversations.readConversation(session.threadId);
-        return { source: "app-server", syncStatus: "synced", message: null, turns: conversation.turns.map((turn) => {
-          const user = turn.items.find((item) => item.type === "user")?.text ?? "";
-          const agent = [...turn.items].reverse().find((item) => item.type === "agent")?.text ?? "";
-          return {
-            id: turn.id, sequence: turn.sequence, status: turn.status,
-            promptPreview: preview(user), assistantPreview: preview(agent), startedAt: turn.startedAt,
-            completedAt: turn.completedAt, selectedByDefault: turn.status === "completed",
-          };
-        }) };
-      } catch (error) {
-        const unavailable = error instanceof DomainError && error.code === "APP_SERVER_UNAVAILABLE";
-        synchronization = {
-          syncStatus: unavailable ? "unavailable" : "pending",
-          message: unavailable ? error.message : `Codex 会话仍在同步：${error instanceof Error ? error.message : String(error)}`,
-        };
-      }
-    }
-    const turns = await this.turns.listBySessionId(sessionId);
-    return { source: "hook-cache", ...synchronization, turns: turns.map((turn) => ({
+    if (!session) throw new DomainError("SESSION_NOT_FOUND", "Session does not exist.");
+    return { turns: session.turns.map((turn) => ({
       id: turn.id,
       sequence: turn.sequence,
       status: turn.status,
-      promptPreview: turn.props.promptPreview,
-      assistantPreview: turn.props.assistantPreview,
+      promptPreview: preview(turn.props.promptContent),
+      assistantPreview: preview(turn.props.assistantContent),
       startedAt: turn.props.startedAt,
       completedAt: turn.props.completedAt,
       selectedByDefault: turn.status === "completed",

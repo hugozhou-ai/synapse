@@ -8,8 +8,8 @@ export interface CodexTurnProps {
   readonly id: string;
   readonly sequence: number;
   readonly status: TurnStatus;
-  readonly promptPreview: string;
-  readonly assistantPreview: string;
+  readonly promptContent: string;
+  readonly assistantContent: string;
   readonly startedAt: string;
   readonly completedAt: string | null;
 }
@@ -76,7 +76,7 @@ export class CodexSessionAggregate {
     this.events.push({ name: "SessionObserved", occurredAt: input.at, payload: { sessionId: this.id } });
   }
 
-  startTurn(input: { turnId: string; promptPreview: string; at: string }): void {
+  startTurn(input: { turnId: string; promptContent: string; at: string }): void {
     const existingIndex = this.props.turns.findIndex((turn) => turn.id === input.turnId);
     const turns = [...this.props.turns];
     const existing = existingIndex >= 0 ? turns[existingIndex]! : null;
@@ -85,8 +85,8 @@ export class CodexSessionAggregate {
       id: input.turnId,
       sequence: existing?.sequence ?? turns.length,
       status: alreadyFinished ? existing.status : "running",
-      promptPreview: input.promptPreview,
-      assistantPreview: existing?.props.assistantPreview ?? "",
+      promptContent: input.promptContent,
+      assistantContent: existing?.props.assistantContent ?? "",
       startedAt: existing?.props.startedAt ?? input.at,
       completedAt: alreadyFinished ? existing.props.completedAt : null,
     });
@@ -102,18 +102,18 @@ export class CodexSessionAggregate {
     if (!alreadyFinished) this.events.push({ name: "TurnStarted", occurredAt: input.at, payload: { sessionId: this.id, turnId: input.turnId } });
   }
 
-  completeTurn(input: { turnId: string; assistantPreview: string; status?: Exclude<TurnStatus, "running">; at: string }): void {
+  completeTurn(input: { turnId: string; assistantContent: string; status?: Exclude<TurnStatus, "running">; at: string }): void {
     const turns = [...this.props.turns];
     const index = turns.findIndex((turn) => turn.id === input.turnId);
     const status = input.status ?? "completed";
     if (index < 0) {
       turns.push(new CodexTurn({
-        id: input.turnId, sequence: turns.length, status, promptPreview: "",
-        assistantPreview: input.assistantPreview, startedAt: input.at, completedAt: input.at,
+        id: input.turnId, sequence: turns.length, status, promptContent: "",
+        assistantContent: input.assistantContent, startedAt: input.at, completedAt: input.at,
       }));
     } else {
       const current = turns[index]!;
-      turns[index] = new CodexTurn({ ...current.props, status, assistantPreview: input.assistantPreview, completedAt: input.at });
+      turns[index] = new CodexTurn({ ...current.props, status, assistantContent: input.assistantContent, completedAt: input.at });
     }
     const hasRunningTurn = turns.some((turn) => turn.status === "running");
     this.props = {
@@ -134,6 +134,14 @@ export class CodexSessionAggregate {
     this.props = { ...this.props, status: "summarized", summarizedAt: at, lastEventAt: at };
   }
 
+  reopenAfterSummaryDeletion(): void {
+    let status: SessionStatus = this.props.status;
+    if (status === "summarized") {
+      status = this.props.turns.some((turn) => turn.status === "running") ? "running" : this.props.turns.length > 0 ? "ready" : "observed";
+    }
+    this.props = { ...this.props, status, summarizedAt: null };
+  }
+
   ignore(at: string): void {
     this.props = { ...this.props, status: "ignored", ignoredAt: at, lastEventAt: at };
   }
@@ -152,8 +160,8 @@ export interface CodexLifecycleEvent {
   readonly turnId: string | null;
   readonly cwd: string;
   readonly model: string | null;
-  readonly promptPreview: string;
-  readonly assistantPreview: string;
+  readonly promptContent: string;
+  readonly assistantContent: string;
   readonly occurredAt: string;
   readonly payloadHash: string;
 }

@@ -4,7 +4,7 @@ import type { App } from "electron";
 import { CodexHookManagementService, type HookManagementService } from "@application/hook-management";
 import { PersistentSettingsApplicationService, RepositoryProfileApplicationService, RepositorySessionQueryService, RepositorySummaryQueryService, SystemExportApplicationService, type ExportApplicationService, type ProfileApplicationService, type SessionQueryService, type SettingsApplicationService, type SummaryQueryService } from "@application/query-services";
 import { HookBasedSessionAwarenessService, type SessionAwarenessService } from "@application/session-services";
-import { DefaultProfileSessionSummaryService, OutboxSummaryPublicationService, ProfileDrivenSummaryGenerationService, VersionedSummaryFinalizationService, type DefaultSessionSummaryService, type SummaryFinalizationService, type SummaryGenerationService, type SummaryPublicationService } from "@application/summary-services";
+import { DefaultProfileSessionSummaryService, OutboxSummaryPublicationService, ProfileDrivenSummaryGenerationService, TransactionalSummaryDeletionService, VersionedSummaryFinalizationService, type DefaultSessionSummaryService, type SummaryDeletionService, type SummaryFinalizationService, type SummaryGenerationService, type SummaryPublicationService } from "@application/summary-services";
 import { ArbitraryTurnSelectionService, DefaultSessionLifecycleService, NormalizedTurnSummaryContextService } from "@domain/services";
 import { LazyCodexAppServerRuntime } from "@infrastructure/app-server/runtime";
 import { ElectronExportGateway } from "@infrastructure/electron/export-gateway";
@@ -28,6 +28,7 @@ export class ElectronApplicationContainer {
   readonly summaryQueries!: SummaryQueryService;
   readonly summaryGeneration!: SummaryGenerationService;
   readonly defaultSessionSummary!: DefaultSessionSummaryService;
+  readonly summaryDeletion!: SummaryDeletionService;
   readonly summaryFinalization!: SummaryFinalizationService;
   readonly summaryPublication!: SummaryPublicationService;
   readonly profiles!: ProfileApplicationService;
@@ -69,7 +70,7 @@ export class ElectronApplicationContainer {
     const appServer = new LazyCodexAppServerRuntime(settingsValue.codexBinaryPath, supportDirectory, logger);
     appServer.start();
     const summaryGeneration = new ProfileDrivenSummaryGenerationService(
-      appServer, new ArbitraryTurnSelectionService(), new NormalizedTurnSummaryContextService(new NodeContentHashService()),
+      new ArbitraryTurnSelectionService(), new NormalizedTurnSummaryContextService(new NodeContentHashService()),
       appServer, profiles, summaries, sessions, jobs, unitOfWork, clock, ids,
     );
     const defaultSessionSummary = new DefaultProfileSessionSummaryService(summaryGeneration, sessions, profiles, settingsRepository, summaries);
@@ -91,10 +92,11 @@ export class ElectronApplicationContainer {
 
     const services = {
       sessionAwareness: awareness,
-      sessionQueries: new RepositorySessionQueryService(sessions, turns, clock, appServer),
+      sessionQueries: new RepositorySessionQueryService(sessions, clock, summaries),
       summaryQueries: new RepositorySummaryQueryService(summaries),
       summaryGeneration,
       defaultSessionSummary,
+      summaryDeletion: new TransactionalSummaryDeletionService(summaries, sessions, outbox, unitOfWork),
       summaryFinalization: finalization,
       summaryPublication: publication,
       profiles: new RepositoryProfileApplicationService(profiles, ids),

@@ -57,25 +57,27 @@
 - `HookEventReceiver` → `UnixSocketHookEventReceiver`
 - `HookEventSpool` → `FileSystemHookEventSpool`
 - `CodexAppServerClient` → `StdioCodexAppServerClient`
-- `ConversationGateway` → `AppServerConversationGateway`
 - `SummaryAgentGateway` → `CodexAppServerSummaryAgentGateway`
 - `SummaryPublisher` → `AppleNotesSummaryPublisher`
 - `NotesTargetGateway` → `AppleNotesSummaryPublisher`
 - `AppServerRuntimeStatusProvider` → `LazyCodexAppServerRuntime`
 - `ExportGateway` → `ElectronExportGateway`
 
-Hook 与 App Server 原始 DTO 分别通过 `CodexHookProtocolMapper`、`CodexProtocolMapper` 转换，绝不直接进入领域或 renderer。
+Hook 原始 DTO 通过 `CodexHookProtocolMapper` 转换，绝不直接进入领域或 renderer。
 
 ## 关键事务
 
-1. Hook ingest：去重事件、session/turn 更新、领域 event outbox 在同一 `BEGIN IMMEDIATE` 事务中提交。Receiver 只在事务提交后返回 `OK`，Relay 未收到 ACK 必须写入离线 spool。
-2. 总结生成：先创建 job 并提交，再调用 agent；完成后在独立事务写 draft 和阶段覆盖信息。agent 调用期间不持有 SQLite 事务。
+1. Hook ingest：去重事件、完整 prompt/assistant 内容、session/turn 更新与领域 event outbox 在同一 `BEGIN IMMEDIATE` 事务中提交。Receiver 只在事务提交后返回 `OK`，Relay 未收到 ACK 必须写入离线 spool。
+2. 总结生成：从已提交的本地 turns 构造上下文，先创建 job 并提交，再调用 agent；完成后在独立事务写 draft 和阶段覆盖信息。agent 调用期间不持有 SQLite 事务。
 3. Finalize：不可变 final、`currentVersionId`、session summarized 和 Notes outbox 同一事务提交。
 4. Notes worker：一个 outbox 自动尝试一次。失败保留明确错误，等待用户点击重试；成功记录固定 Notes identifier 并关闭同一文档的待处理消息。
+5. 删除总结：全文索引、版本、生成任务、Notes 本地发布记录和 outbox 与文档在同一事务删除；删除最后一份总结时恢复源 session。仓储严格区分 create/update，后台旧任务不能重新创建已删除文档。
 
 ## App Server harness
 
-`LazyCodexAppServerRuntime` 在 Hook receiver、SQLite 和窗口启动后于后台初始化。`CodexBinaryResolver` 按显式路径、Desktop 内置 binary、登录 shell 的 `codex` 查找候选；候选通过 `initialize`/`initialized`、`model/list`、`hooks/list` 与 `account/read` 握手后才被采用。App Server 不可用不会阻塞 Hook 感知，turn 查询通过显式同步状态告知 Renderer 当前是否使用 Hook cache。
+`LazyCodexAppServerRuntime` 在 Hook receiver、SQLite 和窗口启动后于后台初始化。`CodexBinaryResolver` 按显式路径、Desktop 内置 binary、登录 shell 的 `codex` 查找候选；候选通过 `initialize`/`initialized`、`model/list`、`hooks/list` 与 `account/read` 握手后才被采用。会话原文由 Hook 直接持久化，不依赖另一个 App Server 进程加载源 thread；App Server 只负责总结 agent、模型列表与 Hook 信任。
+
+`CodexAppServerSupervisor` 只对明确的 transport error 执行单飞恢复。JSON-RPC 协议错误不会触发全局进程重启，避免中断同一进程中正在运行的总结 thread。
 
 主进程日志同时写入控制台与权限为 `0600` 的 `~/Library/Application Support/Synapse/logs/synapse.log`。Hook 安装状态、receiver 生命周期和事件入库使用统一的 `[synapse:hook]` JSON 日志，便于区分“未安装、未信任、未收到、入库失败”四类问题。
 
@@ -100,7 +102,7 @@ Renderer 顶层由 `RendererErrorBoundary` 隔离渲染异常，并通过类型�
 
 - `features/widget`：全局挂件。
 - `features/queue`：进行中与待总结任务队列。
-- `features/summary`：turn 选择、同步状态、总结设置与草稿编辑。
+- `features/summary`：turn 选择、总结设置与草稿编辑。
 - `features/history`：检索、版本历史、再生成与导出。
 - `features/settings`：App Server、Hook、Notes 和整理方案。
 - `hooks`：会话队列订阅与总结草稿状态机。

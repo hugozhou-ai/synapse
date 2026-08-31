@@ -17,7 +17,7 @@ const api: SynapseApi = {
   summaries: {
     generate: (command) => invoke("summaries:generate", command), generateDefault: (id) => invoke("summaries:generate-default", id), regenerate: (command) => invoke("summaries:regenerate", command), updateDraft: (command) => invoke("summaries:update", command),
     finalize: (command) => invoke("summaries:finalize", command), search: (query) => invoke("summaries:search", query),
-    get: (id) => invoke("summaries:get", id), retryNotes: (id) => invoke("summaries:retry-notes", id),
+    get: (id) => invoke("summaries:get", id), delete: (id) => invoke("summaries:delete", id), retryNotes: (id) => invoke("summaries:retry-notes", id),
   },
   profiles: { list: () => invoke("profiles:list"), save: (command) => invoke("profiles:save", command), delete: (id) => invoke("profiles:delete", id) },
   settings: { read: () => invoke("settings:read"), update: (command) => invoke("settings:update", command), models: () => invoke("settings:models"), notesTargets: () => invoke("settings:notes-targets"), runtime: () => invoke("settings:runtime") },
@@ -29,7 +29,7 @@ const api: SynapseApi = {
   diagnostics: { reportRendererError: (report) => invoke("diagnostics:renderer-error", report) },
   window: {
     openHistory: () => invoke("window:history"), openQueue: () => invoke("window:queue"), openSettings: () => invoke("window:settings"),
-    openSummary: (id) => invoke("window:summary", id), resizeWidget: (expanded) => invoke("window:resize-widget", expanded),
+    openSummaryResult: (id) => invoke("window:summary-result", id), resizeWidget: (expanded) => invoke("window:resize-widget", expanded),
     onSessionsChanged: (listener) => { const handler = () => listener(); ipcRenderer.on("synapse:sessions-changed", handler); return () => ipcRenderer.removeListener("synapse:sessions-changed", handler); },
     onNavigate: (listener) => { const handler = (_event: Electron.IpcRendererEvent, path: string) => listener(path); ipcRenderer.on("synapse:navigate", handler); return () => ipcRenderer.removeListener("synapse:navigate", handler); },
   },

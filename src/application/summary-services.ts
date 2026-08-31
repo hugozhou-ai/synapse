@@ -1,8 +1,10 @@
 import type { SummaryContextService } from "@domain/services";
+import type { CodexConversation } from "@domain/conversation";
+import type { CodexSessionAggregate } from "@domain/session";
 import { PublicationTarget, SourceRevision, SummaryDocumentAggregate, SummaryVersion } from "@domain/summary";
 import { DomainError } from "@domain/shared";
 import type {
-  Clock, CodexSessionRepository, ConversationGateway, IdGenerator, OutboxRepository, PublicationRepository, SettingsRepository,
+  Clock, CodexSessionRepository, IdGenerator, OutboxRepository, PublicationRepository, SettingsRepository,
   SummaryAgentGateway, SummaryDocumentRepository, SummaryJobRepository, SummaryProfileRepository,
   SummaryPublisher, TurnSelectionValidator, UnitOfWork,
 } from "./ports";
@@ -20,7 +22,37 @@ export interface DefaultSessionSummaryService {
   generate(sessionId: string): Promise<SummaryDraft>;
 }
 
+export interface SummaryDeletionService {
+  delete(documentId: string): Promise<void>;
+}
+
+export class TransactionalSummaryDeletionService implements SummaryDeletionService {
+  constructor(
+    private readonly summaries: SummaryDocumentRepository,
+    private readonly sessions: CodexSessionRepository,
+    private readonly outbox: OutboxRepository,
+    private readonly unitOfWork: UnitOfWork,
+  ) {}
+
+  async delete(documentId: string): Promise<void> {
+    await this.unitOfWork.execute(async () => {
+      const document = await this.summaries.findById(documentId);
+      if (!document) throw new DomainError("SUMMARY_NOT_FOUND", "Summary document does not exist.");
+      await this.outbox.deleteAggregate("notes-sync", documentId);
+      await this.summaries.delete(documentId);
+      if (await this.summaries.findLatestBySessionId(document.snapshot.sessionId)) return;
+      const session = await this.sessions.findById(document.snapshot.sessionId);
+      if (session) {
+        session.reopenAfterSummaryDeletion();
+        await this.sessions.save(session);
+      }
+    });
+  }
+}
+
 export class DefaultProfileSessionSummaryService implements DefaultSessionSummaryService {
+  private readonly inFlight = new Map<string, Promise<SummaryDraft>>();
+
   constructor(
     private readonly generation: SummaryGenerationService,
     private readonly sessions: CodexSessionRepository,
@@ -29,12 +61,19 @@ export class DefaultProfileSessionSummaryService implements DefaultSessionSummar
     private readonly summaries: SummaryDocumentRepository,
   ) {}
 
-  async generate(sessionId: string): Promise<SummaryDraft> {
+  generate(sessionId: string): Promise<SummaryDraft> {
+    const running = this.inFlight.get(sessionId);
+    if (running) return running;
+    const generation = this.generateOnce(sessionId).finally(() => { this.inFlight.delete(sessionId); });
+    this.inFlight.set(sessionId, generation);
+    return generation;
+  }
+
+  private async generateOnce(sessionId: string): Promise<SummaryDraft> {
     const session = await this.sessions.findById(sessionId);
     if (!session) throw new DomainError("SESSION_NOT_FOUND", "Session does not exist.");
     const selectedTurnIds = session.turns.filter((turn) => turn.status !== "running").map((turn) => turn.id);
-    const stopTurnId = selectedTurnIds.at(-1);
-    if (!stopTurnId) throw new DomainError("SESSION_NOT_READY", "Session has no completed turns to summarize.");
+    if (selectedTurnIds.length === 0) throw new DomainError("SESSION_NOT_READY", "Session has no completed turns to summarize.");
     const profile = (await this.profiles.list()).find((candidate) => candidate.isDefault);
     if (!profile) throw new DomainError("DEFAULT_PROFILE_NOT_FOUND", "A default summary profile is required.");
     const settings = await this.settings.read();
@@ -47,7 +86,7 @@ export class DefaultProfileSessionSummaryService implements DefaultSessionSummar
       return { documentId: existing.id, versionId: current.props.id, content: current.props.content };
     }
     return this.generation.generateDraft({
-      sessionId, selectedTurnIds, profileId: profile.id, stopTurnId, model: settings.summaryModel,
+      sessionId, selectedTurnIds, profileId: profile.id, model: settings.summaryModel,
       syncToNotes: settings.syncNotesByDefault, publicationTarget,
     });
   }
@@ -63,7 +102,6 @@ function sameTarget(left: PublicationTarget | null, right: PublicationTarget | n
 
 export class ProfileDrivenSummaryGenerationService implements SummaryGenerationService {
   constructor(
-    private readonly conversations: ConversationGateway,
     private readonly selections: TurnSelectionValidator,
     private readonly contexts: SummaryContextService,
     private readonly agent: SummaryAgentGateway,
@@ -81,9 +119,8 @@ export class ProfileDrivenSummaryGenerationService implements SummaryGenerationS
     if (!session) throw new DomainError("SESSION_NOT_FOUND", "Session does not exist.");
     const profile = await this.profiles.findById(command.profileId);
     if (!profile) throw new DomainError("PROFILE_NOT_FOUND", "Summary profile does not exist.");
-    const conversation = await this.conversations.waitUntilTurnPersisted(session.threadId, command.stopTurnId);
     const selection = this.selections.create(session.turns, command.selectedTurnIds);
-    const context = await this.contexts.build(conversation, selection);
+    const context = await this.contexts.build(toStoredConversation(session), selection);
     const now = this.clock.now();
     const document = SummaryDocumentAggregate.create({
       id: this.ids.next(), sessionId: session.id, profileId: profile.id, selection,
@@ -91,7 +128,7 @@ export class ProfileDrivenSummaryGenerationService implements SummaryGenerationS
     });
     const jobId = this.ids.next();
     await this.unitOfWork.execute(async () => {
-      await this.summaries.save(document);
+      await this.summaries.create(document);
       await this.jobs.save({ id: jobId, documentId: document.id, status: "running", error: null, coveredTurnIds: context.sourceTurnIds, stageCoverage: [], createdAt: now, updatedAt: now });
     });
     return this.runAgent(document, profile, context, jobId, command.model);
@@ -103,9 +140,8 @@ export class ProfileDrivenSummaryGenerationService implements SummaryGenerationS
     const session = await this.sessions.findById(document.snapshot.sessionId);
     const profile = await this.profiles.findById(command.profileId);
     if (!session || !profile) throw new DomainError("SUMMARY_SOURCE_NOT_FOUND", "Summary source no longer exists.");
-    const conversation = await this.conversations.waitUntilTurnPersisted(session.threadId, command.stopTurnId);
     const selection = this.selections.create(session.turns, command.selectedTurnIds);
-    const context = await this.contexts.build(conversation, selection);
+    const context = await this.contexts.build(toStoredConversation(session), selection);
     const jobId = this.ids.next(); const now = this.clock.now();
     await this.jobs.save({ id: jobId, documentId: document.id, status: "running", error: null, coveredTurnIds: context.sourceTurnIds, stageCoverage: [], createdAt: now, updatedAt: now });
     return this.runAgent(document, profile, context, jobId, command.model, selection);
@@ -147,6 +183,23 @@ export class ProfileDrivenSummaryGenerationService implements SummaryGenerationS
       throw error;
     }
   }
+}
+
+function toStoredConversation(session: CodexSessionAggregate): CodexConversation {
+  return {
+    threadId: session.threadId,
+    turns: session.turns.map((turn) => ({
+      id: turn.id,
+      sequence: turn.sequence,
+      status: turn.status,
+      startedAt: turn.props.startedAt,
+      completedAt: turn.props.completedAt,
+      items: [
+        ...(turn.props.promptContent ? [{ type: "user" as const, text: turn.props.promptContent }] : []),
+        ...(turn.props.assistantContent ? [{ type: "agent" as const, text: turn.props.assistantContent }] : []),
+      ],
+    })),
+  };
 }
 
 export interface SummaryFinalizationService {

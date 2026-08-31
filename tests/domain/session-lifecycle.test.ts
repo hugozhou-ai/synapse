@@ -4,7 +4,7 @@ import type { CodexLifecycleEvent } from "@domain/session";
 
 const event = (eventType: CodexLifecycleEvent["eventType"], turnId: string | null, at: string): CodexLifecycleEvent => ({
   eventType, sessionId: "session-1", threadId: "session-1", turnId, cwd: "/repo", model: "gpt-test",
-  promptPreview: eventType === "UserPromptSubmit" ? "Implement feature" : "", assistantPreview: eventType === "Stop" ? "Done" : "",
+  promptContent: eventType === "UserPromptSubmit" ? "Implement feature" : "", assistantContent: eventType === "Stop" ? "Done" : "",
   occurredAt: at, payloadHash: `${eventType}-${at}`,
 });
 
@@ -27,7 +27,7 @@ describe("DefaultSessionLifecycleService", () => {
     session = service.apply(session, event("UserPromptSubmit", "turn-1", "2026-01-01T00:00:01.000Z")).session;
     expect(session.status).toBe("ready");
     expect(session.turns[0]?.status).toBe("completed");
-    expect(session.turns[0]?.props.promptPreview).toBe("Implement feature");
+    expect(session.turns[0]?.props.promptContent).toBe("Implement feature");
   });
 
   it("keeps the session running when a stale Stop follows a newer prompt", () => {

@@ -5,6 +5,17 @@ import type { Logger } from "@shared/logger";
 export interface CodexNotification { readonly method: string; readonly params: unknown; }
 export type Unsubscribe = () => void;
 
+export class CodexAppServerRpcError extends Error {
+  override readonly name = "CodexAppServerRpcError";
+  constructor(readonly code: unknown, message: string) {
+    super(`App Server ${String(code)}: ${message}`);
+  }
+}
+
+export class CodexAppServerTransportError extends Error {
+  override readonly name = "CodexAppServerTransportError";
+}
+
 export interface CodexAppServerClient {
   connect(): Promise<void>;
   request<T>(method: string, params: unknown): Promise<T>;
@@ -25,7 +36,7 @@ export class JsonRpcRequestRegistry {
   create(timeoutMs: number): { id: number; promise: Promise<unknown> } {
     const id = this.nextId++;
     const promise = new Promise<unknown>((resolve, reject) => {
-      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`App Server request ${id} timed out.`)); }, timeoutMs);
+      const timer = setTimeout(() => { this.pending.delete(id); reject(new CodexAppServerTransportError(`App Server request ${id} timed out.`)); }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
     });
     return { id, promise };
@@ -63,7 +74,8 @@ export class StdioCodexAppServerClient implements CodexAppServerClient {
   async request<T>(method: string, params: unknown): Promise<T> {
     await this.connect();
     const pending = this.requests.create(this.requestTimeoutMs);
-    this.send({ method, id: pending.id, params });
+    try { this.send({ method, id: pending.id, params }); }
+    catch (error) { this.requests.reject(pending.id, toTransportError(error)); }
     return pending.promise as Promise<T>;
   }
 
@@ -75,6 +87,7 @@ export class StdioCodexAppServerClient implements CodexAppServerClient {
     const child = this.process;
     this.process = null; this.lines?.close(); this.lines = null;
     if (!child) return;
+    this.requests.rejectAll(new CodexAppServerTransportError("Codex App Server connection closed."));
     child.stdin.end();
     await new Promise<void>((resolve) => {
       const timer = setTimeout(() => { child.kill("SIGTERM"); resolve(); }, 2_000);
@@ -91,20 +104,35 @@ export class StdioCodexAppServerClient implements CodexAppServerClient {
       const message = String(chunk).trim();
       if (message) this.logger.info("[synapse:app-server]", "stderr", { message });
     });
-    child.once("error", (error) => this.handleExit(error));
-    child.once("exit", (code, signal) => this.handleExit(new Error(`App Server exited (${String(code)}/${String(signal)}).`)));
+    child.once("error", (error) => this.handleExit(child, error));
+    child.once("exit", (code, signal) => this.handleExit(child, new Error(`App Server exited (${String(code)}/${String(signal)}).`)));
     const initialized = this.requests.create(this.requestTimeoutMs);
-    this.send({
-      method: "initialize", id: initialized.id,
-      params: { clientInfo: { name: "synapse", title: "Synapse", version: "0.1.0" }, capabilities: { optOutNotificationMethods: ["item/reasoning/textDelta", "item/reasoning/summaryTextDelta"] } },
-    });
-    await initialized.promise;
-    this.send({ method: "initialized", params: {} });
+    try {
+      try {
+        this.send({
+          method: "initialize", id: initialized.id,
+          params: { clientInfo: { name: "synapse", title: "Synapse", version: "0.1.0" }, capabilities: { optOutNotificationMethods: ["item/reasoning/textDelta", "item/reasoning/summaryTextDelta"] } },
+        });
+      } catch (error) { this.requests.reject(initialized.id, toTransportError(error)); }
+      await initialized.promise;
+      this.send({ method: "initialized", params: {} });
+    } catch (error) {
+      const connectionError = error instanceof Error ? error : new Error(String(error));
+      this.requests.reject(initialized.id, connectionError);
+      if (this.process === child) {
+        this.process = null;
+        this.lines?.close();
+        this.lines = null;
+        this.requests.rejectAll(toTransportError(error));
+        child.kill("SIGTERM");
+      }
+      throw connectionError;
+    }
     this.logger.info("[synapse:app-server]", "connected", { binaryPath: this.binaryPath });
   }
 
   private send(message: unknown): void {
-    if (!this.process?.stdin.writable) throw new Error("Codex App Server is not connected.");
+    if (!this.process?.stdin.writable) throw new CodexAppServerTransportError("Codex App Server is not connected.");
     this.process.stdin.write(`${JSON.stringify(message)}\n`);
   }
 
@@ -114,7 +142,7 @@ export class StdioCodexAppServerClient implements CodexAppServerClient {
     catch (error) { this.logger.error("[synapse:app-server]", "invalid-json", { message: error instanceof Error ? error.message : String(error) }); return; }
     if (typeof message.id === "number" && typeof message.method === "string") { this.rejectServerRequest(message); return; }
     if (typeof message.id === "number") {
-      if (message.error) this.requests.reject(message.id, new Error(`App Server ${String(message.error.code)}: ${String(message.error.message)}`));
+      if (message.error) this.requests.reject(message.id, new CodexAppServerRpcError(message.error.code, String(message.error.message)));
       else this.requests.resolve(message.id, message.result);
       return;
     }
@@ -133,9 +161,14 @@ export class StdioCodexAppServerClient implements CodexAppServerClient {
     this.logger.error("[synapse:app-server]", "unexpected-server-request-rejected", { method });
   }
 
-  private handleExit(error: Error): void {
-    if (!this.process) return;
-    this.process = null; this.requests.rejectAll(error);
+  private handleExit(child: ChildProcessWithoutNullStreams, error: Error): void {
+    if (this.process !== child) return;
+    this.process = null; this.requests.rejectAll(toTransportError(error));
     this.logger.error("[synapse:app-server]", "process-exited", { message: error.message });
   }
+}
+
+function toTransportError(error: unknown): CodexAppServerTransportError {
+  if (error instanceof CodexAppServerTransportError) return error;
+  return new CodexAppServerTransportError(error instanceof Error ? error.message : String(error));
 }

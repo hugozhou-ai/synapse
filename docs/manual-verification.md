@@ -7,6 +7,7 @@
 - 运行 `npm run dev`，确认挂件出现在主屏幕右上安全区。
 - 确认挂件透明、无边框、置顶、所有 Space 可见，拖到另一显示器后重启仍恢复对应位置。
 - 确认收起态显示进行中/待总结数量，展开态最多显示 3 条并用 `+N` 展示其余数量。
+- 在挂件点击“总结”后确认工作区不打开，按钮原位变为 loading；完成后按钮右侧出现跳转图标，点击直接打开对应历史详情。
 - Tray 可打开历史、显示/隐藏挂件和退出。
 
 ## Codex Hook
@@ -28,8 +29,8 @@
 
 - 打开总结面板，确认 completed turns 默认选中，failed/interrupted 可见但默认不选。
 - 验证单击、Shift 连选、全选/取消，以及按住约 350ms 后拖过多行；长按结束不应反向取消首行。
-- 选择任意非连续 turns 生成草稿；确认 App Server 不可用时只显示可操作错误，Hook 监控保持正常。
-- 在 App Server 启动较慢或会话尚未持久化时，确认 turn 面板明确显示“同步中/不可用”，同步完成前不允许基于缓存生成。
+- 选择任意非连续 turns 生成草稿；确认 App Server 不可用时只影响 agent 生成，Hook 监控与本地 turns 仍保持正常。
+- 对没有本地 rollout、但 Hook 已完整接收 prompt/assistant 的任务执行总结，确认不会出现 `thread not loaded`。
 - 编辑标题、摘要、标签与 Markdown，等待自动保存；切换预览后确认格式。
 - 点击完成后出现 final，历史中保留 agent draft、edited draft、final 各版本。
 - 对长会话生成总结，检查 `summary_jobs.stage_coverage_json` 包含 chunk 与 final 的 turn IDs。
@@ -38,6 +39,8 @@
 
 - 验证全文搜索和项目/profile/日期/状态过滤。
 - 在历史详情重新生成、编辑并确认新 final，旧 final 保持不变。
+- 在历史详情操作栏点击“删除”，确认第一次只切换为“确认删除”；第二次点击后详情和历史条目消失。若它是该 session 最后一份总结，确认源任务重新出现在待整理队列。
+- 删除已同步到 Notes 的总结，确认 Synapse 本地版本、全文索引及发布状态已删除，同时已有 Apple Notes 内容不受影响。
 - 导出 Markdown/JSON，检查内容与当前版本一致。
 - “数据库目录”只在 Finder 中显示目录，不移动活动 SQLite 文件。
 

@@ -7,7 +7,7 @@ import { SqliteCodexSessionRepository, SqliteCodexTurnRepository, SqliteHookEven
 import { SqliteUnitOfWork } from "@infrastructure/sqlite/unit-of-work";
 import { ArbitraryTurnSelectionService, DefaultSessionLifecycleService, NormalizedTurnSummaryContextService } from "@domain/services";
 import { HookBasedSessionAwarenessService } from "@application/session-services";
-import { DefaultProfileSessionSummaryService, ProfileDrivenSummaryGenerationService, VersionedSummaryFinalizationService } from "@application/summary-services";
+import { DefaultProfileSessionSummaryService, ProfileDrivenSummaryGenerationService, TransactionalSummaryDeletionService, VersionedSummaryFinalizationService } from "@application/summary-services";
 import type { GenerateSummaryCommand, SummaryDraft } from "@application/contracts";
 import { CodexSessionAggregate } from "@domain/session";
 import { PublicationTarget, SourceRevision, SummaryDocumentAggregate, SummaryProfile, SummaryVersion, TurnSelection } from "@domain/summary";
@@ -26,11 +26,11 @@ describe("application services", () => {
       const sessions = new SqliteCodexSessionRepository(database); const turns = new SqliteCodexTurnRepository(database);
       let id = 0;
       const service = new HookBasedSessionAwarenessService(new DefaultSessionLifecycleService(), sessions, turns, new SqliteHookEventRepository(database), new SqliteOutboxRepository(database), new SqliteUnitOfWork(database), { now: () => "2026-01-01T00:00:01.000Z" }, { next: () => `id-${++id}` });
-      const event = { eventType: "UserPromptSubmit" as const, sessionId: "session", threadId: "thread", turnId: "turn", cwd: "/repo", model: null, promptPreview: "prompt", assistantPreview: "", occurredAt: "2026-01-01T00:00:00.000Z", payloadHash: "hash" };
+      const event = { eventType: "UserPromptSubmit" as const, sessionId: "session", threadId: "thread", turnId: "turn", cwd: "/repo", model: null, promptContent: "prompt", assistantContent: "", occurredAt: "2026-01-01T00:00:00.000Z", payloadHash: "hash" };
       expect((await service.ingest(event)).duplicate).toBe(false);
       expect((await service.ingest(event)).duplicate).toBe(true);
       expect((await sessions.findById("session"))?.status).toBe("running");
-      expect(await turns.listBySessionId("session")).toHaveLength(1);
+      expect((await sessions.findById("session"))?.turns).toHaveLength(1);
     } finally { database.close(); }
   });
 
@@ -38,11 +38,11 @@ describe("application services", () => {
     const { database } = await testDatabase();
     try {
       const sessions = new SqliteCodexSessionRepository(database); const turns = new SqliteCodexTurnRepository(database); const summaries = new SqliteSummaryDocumentRepository(database); const outbox = new SqliteOutboxRepository(database);
-      const session = CodexSessionAggregate.create("session", "thread", "/repo", "a"); session.startTurn({ turnId: "turn", promptPreview: "prompt", at: "b" }); session.completeTurn({ turnId: "turn", assistantPreview: "done", at: "c" });
+      const session = CodexSessionAggregate.create("session", "thread", "/repo", "a"); session.startTurn({ turnId: "turn", promptContent: "prompt", at: "b" }); session.completeTurn({ turnId: "turn", assistantContent: "done", at: "c" });
       await sessions.save(session); await turns.saveMany(session.id, session.turns);
       const document = SummaryDocumentAggregate.create({ id: "doc", sessionId: "session", profileId: "builtin-task-retrospective", selection: new TurnSelection(["turn"]), publicationTarget: new PublicationTarget(null, "Synapse"), createdAt: "d", updatedAt: "d" });
       document.addDraft(new SummaryVersion({ id: "draft", documentId: "doc", sequence: 0, kind: "agent-draft", content: { title: "Title", abstract: "Abstract", bodyMarkdown: "Body", tags: [] }, sourceRevision: new SourceRevision(["turn"], "hash"), model: null, createdAt: "e" }));
-      await summaries.save(document);
+      await summaries.create(document);
       let id = 0;
       const service = new VersionedSummaryFinalizationService(summaries, sessions, outbox, new SqliteUnitOfWork(database), { now: () => "2026-01-01T00:00:00.000Z" }, { next: () => `final-id-${++id}` });
       const final = await service.finalize({ documentId: "doc", content: { title: "Edited", abstract: "Abstract", bodyMarkdown: "Final", tags: ["tag"] }, syncToNotes: true });
@@ -50,6 +50,35 @@ describe("application services", () => {
       expect((await summaries.findById("doc"))?.snapshot.versions).toHaveLength(2);
       expect((await sessions.findById("session"))?.status).toBe("summarized");
       expect(await outbox.listPending("notes-sync", 10)).toHaveLength(1);
+    } finally { database.close(); }
+  });
+
+  it("deletes a summary and all local dependents without allowing stale writes to restore it", async () => {
+    const { database } = await testDatabase();
+    try {
+      const sessions = new SqliteCodexSessionRepository(database); const turns = new SqliteCodexTurnRepository(database);
+      const summaries = new SqliteSummaryDocumentRepository(database); const jobs = new SqliteSummaryJobRepository(database); const outbox = new SqliteOutboxRepository(database);
+      const session = CodexSessionAggregate.create("session", "thread", "/repo", "a");
+      session.startTurn({ turnId: "turn", promptContent: "prompt", at: "b" }); session.completeTurn({ turnId: "turn", assistantContent: "done", at: "c" }); session.markSummarized("d");
+      await sessions.save(session); await turns.saveMany(session.id, session.turns);
+      const document = SummaryDocumentAggregate.create({ id: "doc", sessionId: "session", profileId: "builtin-task-retrospective", selection: new TurnSelection(["turn"]), publicationTarget: null, createdAt: "d", updatedAt: "d" });
+      document.addDraft(new SummaryVersion({ id: "draft", documentId: "doc", sequence: 0, kind: "agent-draft", content: { title: "Title", abstract: "Abstract", bodyMarkdown: "Body", tags: [] }, sourceRevision: new SourceRevision(["turn"], "hash"), model: null, createdAt: "e" }));
+      await summaries.create(document);
+      await jobs.save({ id: "job", documentId: "doc", status: "succeeded", error: null, coveredTurnIds: ["turn"], stageCoverage: [], createdAt: "e", updatedAt: "e" });
+      await outbox.add({ id: "message", kind: "notes-sync", aggregateId: "doc", payload: {}, createdAt: "e", processedAt: null, attempts: 0, lastError: null });
+      database.connection.prepare("INSERT INTO notes_exports(document_id,publisher,external_id,account,folder,version_id,status,error,updated_at) VALUES (?,?,?,?,?,?,?,?,?)")
+        .run("doc", "apple-notes", "note", null, "Synapse", "draft", "published", null, "e");
+
+      const service = new TransactionalSummaryDeletionService(summaries, sessions, outbox, new SqliteUnitOfWork(database));
+      await service.delete("doc");
+
+      expect(await summaries.findById("doc")).toBeNull();
+      expect((await sessions.findById("session"))?.snapshot).toMatchObject({ status: "ready", summarizedAt: null });
+      for (const table of ["summary_versions", "summary_jobs", "notes_exports", "summary_fts", "outbox"]) {
+        expect((database.connection.prepare(`SELECT COUNT(*) count FROM ${table}`).get() as { count: number }).count).toBe(0);
+      }
+      await expect(summaries.save(document)).rejects.toThrow("Summary document does not exist.");
+      expect(await summaries.findById("doc")).toBeNull();
     } finally { database.close(); }
   });
 
@@ -73,23 +102,25 @@ describe("application services", () => {
       const sessions = new SqliteCodexSessionRepository(database); const turns = new SqliteCodexTurnRepository(database);
       const profiles = new SqliteSummaryProfileRepository(database); const summaries = new SqliteSummaryDocumentRepository(database); const jobs = new SqliteSummaryJobRepository(database);
       const session = CodexSessionAggregate.create("session", "thread", "/repo", "a");
-      session.startTurn({ turnId: "turn-1", promptPreview: "one", at: "b" }); session.completeTurn({ turnId: "turn-1", assistantPreview: "done-one", at: "c" });
-      session.startTurn({ turnId: "turn-2", promptPreview: "two", at: "d" }); session.completeTurn({ turnId: "turn-2", assistantPreview: "done-two", at: "e" });
+      session.startTurn({ turnId: "turn-1", promptContent: "one", at: "b" }); session.completeTurn({ turnId: "turn-1", assistantContent: "done-one", at: "c" });
+      session.startTurn({ turnId: "turn-2", promptContent: "two", at: "d" }); session.completeTurn({ turnId: "turn-2", assistantContent: "done-two", at: "e" });
       await sessions.save(session); await turns.saveMany(session.id, session.turns);
       await profiles.save(new SummaryProfile("new-profile", "New profile", "systemPrompt", "Summarize", false));
-      await summaries.save(SummaryDocumentAggregate.create({ id: "doc", sessionId: "session", profileId: "builtin-task-retrospective", selection: new TurnSelection(["turn-1"]), publicationTarget: null, createdAt: "f", updatedAt: "f" }));
+      await summaries.create(SummaryDocumentAggregate.create({ id: "doc", sessionId: "session", profileId: "builtin-task-retrospective", selection: new TurnSelection(["turn-1"]), publicationTarget: null, createdAt: "f", updatedAt: "f" }));
       let id = 0;
+      let source = "";
       const service = new ProfileDrivenSummaryGenerationService(
-        { async readConversation() { return conversation(); }, async waitUntilTurnPersisted() { return conversation(); } },
         new ArbitraryTurnSelectionService(), new NormalizedTurnSummaryContextService(new NodeContentHashService()),
-        { async generate() { return { title: "New", abstract: "", bodyMarkdown: "Body", tags: [], model: null, stages: [{ kind: "final", turnIds: ["turn-2"] }] }; }, async cancel() {}, async listModels() { return []; } },
+        { async generate(request) { source = request.context.chunks[0]?.content ?? ""; return { title: "New", abstract: "", bodyMarkdown: "Body", tags: [], model: null, stages: [{ kind: "final", turnIds: ["turn-2"] }] }; }, async cancel() {}, async listModels() { return []; } },
         profiles, summaries, sessions, jobs, new SqliteUnitOfWork(database), { now: () => "g" }, { next: () => `generated-${++id}` },
       );
-      await service.regenerate({ documentId: "doc", selectedTurnIds: ["turn-2"], profileId: "new-profile", stopTurnId: "turn-2", model: null });
+      await service.regenerate({ documentId: "doc", selectedTurnIds: ["turn-2"], profileId: "new-profile", model: null });
       const saved = await summaries.findById("doc");
       expect(saved?.snapshot.profileId).toBe("new-profile");
       expect(saved?.snapshot.selection.turnIds).toEqual(["turn-2"]);
       expect(saved?.currentVersion?.props.sourceRevision.turnIds).toEqual(["turn-2"]);
+      expect(source).toContain("two");
+      expect(source).toContain("done-two");
     } finally { database.close(); }
   });
 
@@ -99,35 +130,33 @@ describe("application services", () => {
       const sessions = new SqliteCodexSessionRepository(database); const turns = new SqliteCodexTurnRepository(database);
       const profiles = new SqliteSummaryProfileRepository(database); const summaries = new SqliteSummaryDocumentRepository(database); const settings = new SqliteSettingsRepository(database);
       const session = CodexSessionAggregate.create("session", "thread", "/repo", "a");
-      session.startTurn({ turnId: "turn-1", promptPreview: "one", at: "b" }); session.completeTurn({ turnId: "turn-1", assistantPreview: "done-one", at: "c" });
-      session.startTurn({ turnId: "turn-2", promptPreview: "two", at: "d" }); session.completeTurn({ turnId: "turn-2", assistantPreview: "failed-two", status: "failed", at: "e" });
+      session.startTurn({ turnId: "turn-1", promptContent: "one", at: "b" }); session.completeTurn({ turnId: "turn-1", assistantContent: "done-one", at: "c" });
+      session.startTurn({ turnId: "turn-2", promptContent: "two", at: "d" }); session.completeTurn({ turnId: "turn-2", assistantContent: "failed-two", status: "failed", at: "e" });
       await sessions.save(session); await turns.saveMany(session.id, session.turns);
       await profiles.save(new SummaryProfile("other-profile", "Other", "systemPrompt", "Other rules", false));
       await profiles.save(new SummaryProfile("default-profile", "Default", "systemPrompt", "Default rules", true));
       await settings.save({ ...await settings.read(), summaryModel: "summary-model", syncNotesByDefault: true, notesAccount: "Work", notesFolder: "Synapse" });
       let command: GenerateSummaryCommand | null = null;
+      let generationCalls = 0;
       const generated: SummaryDraft = { documentId: "doc", versionId: "version", content: { title: "Title", abstract: "", bodyMarkdown: "Body", tags: [] } };
       const service = new DefaultProfileSessionSummaryService({
-        async generateDraft(value) { command = value; return generated; },
+        async generateDraft(value) { generationCalls += 1; command = value; return generated; },
         async regenerate() { throw new Error("not used"); },
         async cancel() {},
       }, sessions, profiles, settings, summaries);
-      expect(await service.generate("session")).toEqual(generated);
+      const first = service.generate("session");
+      const second = service.generate("session");
+      expect(second).toBe(first);
+      expect(await first).toEqual(generated);
+      expect(generationCalls).toBe(1);
       expect(command).toMatchObject({
-        sessionId: "session", selectedTurnIds: ["turn-1", "turn-2"], stopTurnId: "turn-2",
+        sessionId: "session", selectedTurnIds: ["turn-1", "turn-2"],
         profileId: "default-profile", model: "summary-model", syncToNotes: true,
         publicationTarget: { account: "Work", folder: "Synapse" },
       });
     } finally { database.close(); }
   });
 });
-
-function conversation() {
-  return { threadId: "thread", turns: [
-    { id: "turn-1", sequence: 0, status: "completed" as const, startedAt: "b", completedAt: "c", items: [{ type: "user" as const, text: "one" }, { type: "agent" as const, text: "done-one" }] },
-    { id: "turn-2", sequence: 1, status: "completed" as const, startedAt: "d", completedAt: "e", items: [{ type: "user" as const, text: "two" }, { type: "agent" as const, text: "done-two" }] },
-  ] };
-}
 
 async function testDatabase() {
   const root = await mkdtemp(join(tmpdir(), "synapse-application-")); directories.push(root);

@@ -19,10 +19,10 @@ export class DefaultSessionLifecycleService implements SessionLifecycleService {
       aggregate.observeSession({ cwd: event.cwd, model: event.model, at: event.occurredAt });
     } else if (event.eventType === "UserPromptSubmit") {
       if (!event.turnId) throw new DomainError("MISSING_TURN_ID", "UserPromptSubmit requires a turn id.");
-      aggregate.startTurn({ turnId: event.turnId, promptPreview: event.promptPreview, at: event.occurredAt });
+      aggregate.startTurn({ turnId: event.turnId, promptContent: event.promptContent, at: event.occurredAt });
     } else {
       if (!event.turnId) throw new DomainError("MISSING_TURN_ID", "Stop requires a turn id.");
-      aggregate.completeTurn({ turnId: event.turnId, assistantPreview: event.assistantPreview, at: event.occurredAt });
+      aggregate.completeTurn({ turnId: event.turnId, assistantContent: event.assistantContent, at: event.occurredAt });
     }
     return { session: aggregate, changed: true };
   }

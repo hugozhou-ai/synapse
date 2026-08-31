@@ -1,4 +1,4 @@
-import type { CodexConversation, GeneratedSummary, SummaryContext } from "@domain/conversation";
+import type { GeneratedSummary, SummaryContext } from "@domain/conversation";
 import type { CodexTurn } from "@domain/session";
 import type { DomainEvent } from "@domain/shared";
 import type {
@@ -65,15 +65,11 @@ export interface OutboxRepository {
   markProcessed(id: string, at: string): Promise<void>;
   markFailed(id: string, error: string): Promise<void>;
   markAggregateProcessed(kind: OutboxMessage["kind"], aggregateId: string, at: string): Promise<void>;
+  deleteAggregate(kind: OutboxMessage["kind"], aggregateId: string): Promise<void>;
 }
 
 export interface UnitOfWork {
   execute<T>(work: () => Promise<T>): Promise<T>;
-}
-
-export interface ConversationGateway {
-  readConversation(threadId: string): Promise<CodexConversation>;
-  waitUntilTurnPersisted(threadId: string, turnId: string): Promise<CodexConversation>;
 }
 
 export interface SummaryAgentRequest {

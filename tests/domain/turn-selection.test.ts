@@ -3,7 +3,7 @@ import { ArbitraryTurnSelectionService } from "@domain/services";
 import { CodexTurn } from "@domain/session";
 
 const turn = (id: string, sequence: number, status: "running" | "completed" | "failed" | "interrupted") => new CodexTurn({
-  id, sequence, status, promptPreview: id, assistantPreview: "", startedAt: "2026-01-01T00:00:00.000Z", completedAt: status === "running" ? null : "2026-01-01T00:00:01.000Z",
+  id, sequence, status, promptContent: id, assistantContent: "", startedAt: "2026-01-01T00:00:00.000Z", completedAt: status === "running" ? null : "2026-01-01T00:00:01.000Z",
 });
 
 describe("ArbitraryTurnSelectionService", () => {

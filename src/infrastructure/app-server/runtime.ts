@@ -3,30 +3,26 @@ import type {
   AgentModel,
   AppServerRuntimeStatus,
   AppServerRuntimeStatusProvider,
-  ConversationGateway,
   HookTrustGateway,
   HookTrustState,
   SummaryAgentGateway,
   SummaryAgentRequest,
 } from "@application/ports";
-import type { CodexConversation, GeneratedSummary } from "@domain/conversation";
+import type { GeneratedSummary } from "@domain/conversation";
 import { DomainError } from "@domain/shared";
 import type { Logger } from "@shared/logger";
 import { StdioCodexAppServerClient, type CodexAppServerClient } from "./client";
-import { AppServerConversationGateway, AppServerHookTrustGateway, CodexAppServerSummaryAgentGateway } from "./gateways";
-import { CodexProtocolMapper } from "./mapper";
+import { AppServerHookTrustGateway, CodexAppServerSummaryAgentGateway } from "./gateways";
 import { CodexBinaryResolver } from "./resolver";
 import { CodexAppServerSupervisor } from "./supervisor";
 
 interface ActiveAdapters {
   readonly client: CodexAppServerClient;
-  readonly conversations: AppServerConversationGateway;
   readonly agent: CodexAppServerSummaryAgentGateway;
   readonly trust: AppServerHookTrustGateway;
 }
 
 export class LazyCodexAppServerRuntime implements
-  ConversationGateway,
   SummaryAgentGateway,
   HookTrustGateway,
   AppServerRuntimeStatusProvider {
@@ -51,14 +47,6 @@ export class LazyCodexAppServerRuntime implements
 
   start(): void { void this.ensureInitialized(); }
   current(): Promise<AppServerRuntimeStatus> { return Promise.resolve(this.status); }
-
-  async readConversation(threadId: string): Promise<CodexConversation> {
-    return (await this.requireAdapters()).conversations.readConversation(threadId);
-  }
-
-  async waitUntilTurnPersisted(threadId: string, turnId: string): Promise<CodexConversation> {
-    return (await this.requireAdapters()).conversations.waitUntilTurnPersisted(threadId, turnId);
-  }
 
   async generate(request: SummaryAgentRequest): Promise<GeneratedSummary> {
     return (await this.requireAdapters()).agent.generate(request);
@@ -125,7 +113,6 @@ export class LazyCodexAppServerRuntime implements
           const authentication = account.account ? "signed-in" : account.requiresOpenaiAuth ? "required" : "not-required";
           this.adapters = {
             client,
-            conversations: new AppServerConversationGateway(client, new CodexProtocolMapper()),
             agent: new CodexAppServerSummaryAgentGateway(client, join(this.supportDirectory, "agent-runtime")),
             trust: new AppServerHookTrustGateway(client),
           };

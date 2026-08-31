@@ -15,6 +15,7 @@ export interface SynapseApi {
     finalize(command: FinalizeSummaryCommand): Promise<FinalizedSummaryView>;
     search(query: SummarySearchCriteria): Promise<SummarySearchResult>;
     get(documentId: string): Promise<SummaryDetailView>;
+    delete(documentId: string): Promise<void>;
     retryNotes(documentId: string): Promise<void>;
   };
   profiles: {
@@ -48,7 +49,7 @@ export interface SynapseApi {
     openHistory(): Promise<void>;
     openQueue(): Promise<void>;
     openSettings(): Promise<void>;
-    openSummary(sessionId: string): Promise<void>;
+    openSummaryResult(documentId: string): Promise<void>;
     resizeWidget(expanded: boolean): Promise<void>;
     onSessionsChanged(listener: () => void): () => void;
     onNavigate(listener: (path: string) => void): () => void;

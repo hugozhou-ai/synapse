@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { JsonRpcRequestRegistry, type CodexAppServerClient, type CodexNotification } from "@infrastructure/app-server/client";
-import { CodexProtocolMapper } from "@infrastructure/app-server/mapper";
-import { AppServerConversationGateway, AppServerHookTrustGateway, CodexAppServerSummaryAgentGateway } from "@infrastructure/app-server/gateways";
+import { CodexAppServerRpcError, CodexAppServerTransportError, JsonRpcRequestRegistry, type CodexAppServerClient, type CodexNotification } from "@infrastructure/app-server/client";
+import { AppServerHookTrustGateway, CodexAppServerSummaryAgentGateway } from "@infrastructure/app-server/gateways";
 import { CodexAppServerSupervisor } from "@infrastructure/app-server/supervisor";
 import { SummaryProfile } from "@domain/summary";
 import type { Logger } from "@shared/logger";
@@ -13,20 +12,6 @@ describe("App Server adapters", () => {
     const registry = new JsonRpcRequestRegistry(); const pending = registry.create(1_000);
     registry.resolve(pending.id, { ok: true });
     await expect(pending.promise).resolves.toEqual({ ok: true });
-  });
-
-  it("maps protocol DTOs without leaking reasoning and waits through persistence races", async () => {
-    let reads = 0;
-    const client = fakeClient(async (method) => {
-      if (method !== "thread/read") throw new Error("unexpected");
-      reads += 1;
-      return { thread: { id: "thread", turns: [{ id: "turn", status: reads < 3 ? "inProgress" : "completed", startedAt: 1, completedAt: reads < 3 ? null : 2, items: [
-        { type: "userMessage", content: [{ type: "text", text: "prompt" }] }, { type: "reasoning", summary: ["secret"], content: ["secret"] }, { type: "agentMessage", text: "done" },
-      ] }] } };
-    });
-    const conversation = await new AppServerConversationGateway(client, new CodexProtocolMapper()).waitUntilTurnPersisted("thread", "turn");
-    expect(reads).toBe(3);
-    expect(conversation.turns[0]?.items.map((item) => item.type)).toEqual(["user", "agent"]);
   });
 
   it("captures a completion emitted before turn/start returns and uses a fixed output schema", async () => {
@@ -56,14 +41,41 @@ describe("App Server adapters", () => {
     let attempts = 0; let connects = 0; let closes = 0;
     const client: CodexAppServerClient = {
       async connect() { connects += 1; },
-      async request<T>(): Promise<T> { attempts += 1; if (attempts % 2 === 1) throw new Error("process exited"); return { ok: true } as T; },
+      async request<T>(): Promise<T> { attempts += 1; if (attempts % 2 === 1) throw new CodexAppServerTransportError("process exited"); return { ok: true } as T; },
       subscribe: () => () => undefined,
       async close() { closes += 1; },
     };
     const supervisor = new CodexAppServerSupervisor(client, logger, 1);
-    await expect(supervisor.request("thread/read", {})).resolves.toEqual({ ok: true });
-    await expect(supervisor.request("thread/read", {})).resolves.toEqual({ ok: true });
+    await expect(supervisor.request("model/list", {})).resolves.toEqual({ ok: true });
+    await expect(supervisor.request("model/list", {})).resolves.toEqual({ ok: true });
     expect({ attempts, connects, closes }).toEqual({ attempts: 4, connects: 2, closes: 2 });
+  });
+
+  it("does not restart the shared App Server for protocol errors", async () => {
+    let connects = 0; let closes = 0;
+    const client = fakeClient(async () => { throw new CodexAppServerRpcError(-32600, "thread not loaded: missing"); });
+    client.connect = async () => { connects += 1; };
+    client.close = async () => { closes += 1; };
+    const supervisor = new CodexAppServerSupervisor(client, logger);
+    await expect(supervisor.request("hooks/list", {})).rejects.toThrow("thread not loaded");
+    expect({ connects, closes }).toEqual({ connects: 0, closes: 0 });
+  });
+
+  it("coalesces concurrent transport recovery into one restart", async () => {
+    let attempts = 0; let connects = 0; let closes = 0;
+    const client: CodexAppServerClient = {
+      async connect() { connects += 1; },
+      async request<T>(): Promise<T> {
+        attempts += 1;
+        if (attempts <= 2) throw new CodexAppServerTransportError("connection lost");
+        return { ok: true } as T;
+      },
+      subscribe: () => () => undefined,
+      async close() { closes += 1; },
+    };
+    const supervisor = new CodexAppServerSupervisor(client, logger, 1);
+    await expect(Promise.all([supervisor.request("hooks/list", {}), supervisor.request("hooks/list", {})])).resolves.toEqual([{ ok: true }, { ok: true }]);
+    expect({ attempts, connects, closes }).toEqual({ attempts: 4, connects: 1, closes: 1 });
   });
 
   it("records chunk coverage before the final synthesis", async () => {

@@ -1,11 +1,11 @@
 # Synapse
 
-Synapse 是一个 macOS 优先的 Electron 全局挂件：通过 Codex lifecycle Hooks 愜知正在进行和刚结束的本地任务，并在用户点击后调用本地 Codex App Server，把选定 turns 整理成可编辑、可追溯的总结。
+Synapse 是一个 macOS 优先的 Electron 全局挂件：通过 Codex lifecycle Hooks 感知并持久化正在进行和刚结束的本地任务，再调用本地 Codex App Server，把选定 turns 整理成可编辑、可追溯的总结。
 
 主要能力：
 
 - 透明、置顶、跨 Space 的全局挂件与 Tray。
-- `SessionStart` / `UserPromptSubmit` / `Stop` Hook 感知，Unix socket 在线传输与 `0600` 离线 spool。
+- `SessionStart` / `UserPromptSubmit` / `Stop` Hook 感知，完整 prompt/assistant 内容本地落库，Unix socket 在线传输与 `0600` 离线 spool。
 - 任意 turn 多选、Shift 连选、350ms 长按拖选。
 - 本地 Codex App Server 总结 harness，固定 JSON Schema，长会话按 turn 分块。
 - SQLite WAL 主存储、不可变版本历史、FTS5 搜索与 Markdown/JSON 导出。
@@ -57,7 +57,7 @@ SQLite 使用 Node 与 Electron 均内置的 `node:sqlite`，开发、测试和�
 - 离线事件：`~/Library/Application Support/Synapse/spool/`
 - Hook manifest 与备份：`~/Library/Application Support/Synapse/`
 
-原始 Codex transcript 只在总结期间存在于内存中，不写入 Synapse 数据库。数据库仅保存会话/turn 的短预览、事件最小元数据和用户确认保留的总结版本。日志不会记录 prompt、transcript 或总结正文，动态字段统一经 `JSON.stringify` 输出。
+SQLite 保存 Hook 提供的完整 prompt/assistant 内容、事件最小元数据和总结版本，供后台整理直接使用；数据不会发送到 Synapse 自有服务。日志不会记录 prompt、会话正文或总结正文，动态字段统一经 `JSON.stringify` 输出。
 
 ## 架构
 

@@ -1,19 +1,22 @@
-export type WorkspaceRoute = "history" | "queue" | "settings" | `summary/${string}`;
+export type WorkspaceRoute = "history" | "queue" | "settings" | `history/${string}` | `summary/${string}`;
 
 export interface SummaryWorkspaceRoute {
   readonly sessionId: string;
-  readonly autoGenerate: boolean;
 }
 
 export function parseWorkspaceRoute(value: string): WorkspaceRoute {
   const route = value.replace(/^#?\/?/, "");
   if (route === "history" || route === "settings" || route === "queue") return route;
-  if (/^summary\/(?:quick\/)?[^/]+$/.test(route)) return route as `summary/${string}`;
+  if (/^history\/[^/]+$/.test(route)) return route as `history/${string}`;
+  if (/^summary\/[^/]+$/.test(route)) return route as `summary/${string}`;
   return "queue";
 }
 
 export function summaryWorkspaceRoute(route: WorkspaceRoute): SummaryWorkspaceRoute | null {
   if (!route.startsWith("summary/")) return null;
-  const autoGenerate = route.startsWith("summary/quick/");
-  return { sessionId: route.slice(autoGenerate ? "summary/quick/".length : "summary/".length), autoGenerate };
+  return { sessionId: route.slice("summary/".length) };
+}
+
+export function historyWorkspaceDocumentId(route: WorkspaceRoute): string | null {
+  return route.startsWith("history/") ? route.slice("history/".length) : null;
 }

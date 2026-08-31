@@ -219,6 +219,15 @@ export class NodeSqliteSynapseDatabase implements SynapseDatabase {
         this.connection.exec("PRAGMA user_version = 2");
       });
     }
+    if (version < 3) {
+      this.migrateTransaction(() => {
+        this.connection.exec("ALTER TABLE codex_turns RENAME COLUMN prompt_preview TO prompt_content");
+        this.connection.exec("ALTER TABLE codex_turns RENAME COLUMN assistant_preview TO assistant_content");
+        const now = new Date().toISOString();
+        this.connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (3, ?)").run(now);
+        this.connection.exec("PRAGMA user_version = 3");
+      });
+    }
   }
 
   private migrateTransaction(operation: () => void): void {

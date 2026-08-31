@@ -11,8 +11,8 @@ const idSchema = z.string().min(1);
 const summaryContentSchema = z.object({ title: z.string().min(1), abstract: z.string(), bodyMarkdown: z.string(), tags: z.array(z.string()) });
 const searchSchema = z.object({ text: z.string().optional(), cwd: z.string().optional(), profileId: z.string().optional(), status: z.string().optional(), from: z.string().optional(), to: z.string().optional(), limit: z.number().int().min(1).max(200), offset: z.number().int().min(0) });
 const publicationTargetSchema = z.object({ account: z.string().nullable(), folder: z.string().min(1) }).nullable();
-const generateSchema = z.object({ sessionId: idSchema, selectedTurnIds: z.array(idSchema).min(1), profileId: idSchema, stopTurnId: idSchema, model: z.string().nullable(), syncToNotes: z.boolean(), publicationTarget: publicationTargetSchema });
-const regenerateSchema = z.object({ documentId: idSchema, selectedTurnIds: z.array(idSchema).min(1), profileId: idSchema, stopTurnId: idSchema, model: z.string().nullable() });
+const generateSchema = z.object({ sessionId: idSchema, selectedTurnIds: z.array(idSchema).min(1), profileId: idSchema, model: z.string().nullable(), syncToNotes: z.boolean(), publicationTarget: publicationTargetSchema });
+const regenerateSchema = z.object({ documentId: idSchema, selectedTurnIds: z.array(idSchema).min(1), profileId: idSchema, model: z.string().nullable() });
 const settingsSchema = z.object({
   codexBinaryPath: z.string().nullable(), summaryModel: z.string().nullable(), syncNotesByDefault: z.boolean(),
   notesAccount: z.string().nullable(), notesFolder: z.string().min(1), widgetVisible: z.boolean(),
@@ -45,6 +45,7 @@ export class ElectronIpcController {
     });
     this.handle("summaries:search", searchSchema, (value) => this.container.summaryQueries.search(compactObject<SummarySearchCriteria>(value)));
     this.handle("summaries:get", idSchema, (id) => this.container.summaryQueries.getDocument(id));
+    this.handle("summaries:delete", idSchema, async (id) => { await this.container.summaryDeletion.delete(id); this.windows.broadcastSessionsChanged(); });
     this.handle("summaries:retry-notes", idSchema, (id) => this.container.summaryPublication.retry(id));
     this.handle("profiles:list", z.unknown(), () => this.container.profiles.list());
     this.handle("profiles:save", z.object({ id: idSchema.optional(), name: z.string().min(1), kind: z.enum(["template", "systemPrompt"]), instructions: z.string().min(1), isDefault: z.boolean() }), (value) => this.container.profiles.save(compactObject<SaveProfileCommand>(value)));
@@ -68,7 +69,7 @@ export class ElectronIpcController {
     this.handle("window:history", z.unknown(), () => this.windows.openHistory());
     this.handle("window:queue", z.unknown(), () => this.windows.openQueue());
     this.handle("window:settings", z.unknown(), () => this.windows.openSettings());
-    this.handle("window:summary", idSchema, (id) => this.windows.openSummary(id));
+    this.handle("window:summary-result", idSchema, (id) => this.windows.openSummaryResult(id));
     this.handle("window:resize-widget", z.boolean(), (expanded) => { this.windows.resizeWidget(expanded); });
   }
 

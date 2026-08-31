@@ -6,7 +6,7 @@ import type { Logger } from "@shared/logger";
 import { resolveRendererUrl } from "./renderer-url";
 import { resolveWidgetPlacement } from "./widget-placement";
 
-type WorkspaceRoute = "queue" | "history" | "settings" | `summary/${string}`;
+type WorkspaceRoute = "queue" | "history" | "settings" | `history/${string}` | `summary/${string}`;
 
 export class ElectronWindowManager {
   private widget: BrowserWindow | null = null;
@@ -48,7 +48,7 @@ export class ElectronWindowManager {
 
   async openQueue(): Promise<void> { await this.openWorkspace("queue"); }
 
-  async openSummary(sessionId: string): Promise<void> { await this.openWorkspace(`summary/quick/${sessionId}`); }
+  async openSummaryResult(documentId: string): Promise<void> { await this.openWorkspace(`history/${documentId}`); }
 
   private async openWorkspace(route: WorkspaceRoute): Promise<void> {
     if (!this.workspace || this.workspace.isDestroyed()) {

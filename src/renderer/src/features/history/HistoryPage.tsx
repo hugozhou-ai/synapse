@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { Database, FileDown, NotebookPen, RefreshCw, Search } from "lucide-react";
+import { Database, FileDown, NotebookPen, RefreshCw, Search, Trash2 } from "lucide-react";
 import type { SummarySearchItem } from "@application/ports";
 import type { SummaryDetailView, SummaryProfileView } from "@application/contracts";
 import { DatePicker } from "../../components/DatePicker";
@@ -8,7 +8,7 @@ import { EmptyState, ErrorBanner, PageHeader } from "../../components/common";
 import { Select } from "../../components/Select";
 import { messageOf, shortPath } from "../../lib/format";
 
-export function HistoryPage() {
+export function HistoryPage({ documentId }: { documentId?: string | null }) {
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<readonly SummarySearchItem[]>([]);
   const [selected, setSelected] = useState<SummaryDetailView | null>(null);
@@ -33,7 +33,9 @@ export function HistoryPage() {
     }).catch((reason) => setError(messageOf(reason)));
   }, [query, filters]);
   useEffect(() => { const timer = window.setTimeout(search, 200); return () => window.clearTimeout(timer); }, [search]);
-  const open = (id: string) => void window.synapse.summaries.get(id).then(setSelected).catch((reason) => setError(messageOf(reason)));
+  const open = useCallback((id: string) => { void window.synapse.summaries.get(id).then(setSelected).catch((reason) => setError(messageOf(reason))); }, []);
+  useEffect(() => { if (documentId) open(documentId); }, [documentId, open]);
+  const deleted = useCallback(() => { setSelected(null); search(); }, [search]);
 
   return <div className="page">
     <PageHeader eyebrow="LOCAL ARCHIVE" title="总结历史" description="全文搜索标题、摘要、正文、标签与工作目录。SQLite 是完整版本历史的唯一主存储。" actions={<button className="secondary" onClick={() => window.synapse.export.revealDatabase()}><Database size={15} />数据库目录</button>} />
@@ -47,29 +49,34 @@ export function HistoryPage() {
       <div className="compact-filter"><span>结束日期</span><DatePicker ariaLabel="结束日期" value={filters.to} onChange={(to) => setFilters({ ...filters, to })} /></div>
     </div>
     <div className="history-layout"><div className="history-list">{items.map((item) => <button className={`history-card ${selected?.id === item.documentId ? "active" : ""}`} key={item.documentId} onClick={() => open(item.documentId)}><span>{item.versionKind}</span><h3>{item.title}</h3><p>{item.abstract}</p><div>{item.tags.slice(0, 3).map((tag) => <em key={tag}>{tag}</em>)}<time>{new Date(item.updatedAt).toLocaleDateString()}</time></div></button>)}{items.length === 0 && <EmptyState><Search size={24} />没有匹配的总结</EmptyState>}</div>
-      <div className="history-detail">{selected?.currentVersion ? <HistoryDetail detail={selected} onChanged={() => open(selected.id)} onError={setError} /> : <EmptyState>选择一条总结查看详情</EmptyState>}</div>
+      <div className="history-detail">{selected?.currentVersion ? <HistoryDetail detail={selected} onChanged={() => open(selected.id)} onDeleted={deleted} onError={setError} /> : <EmptyState>选择一条总结查看详情</EmptyState>}</div>
     </div>
   </div>;
 }
 
-function HistoryDetail({ detail, onChanged, onError }: { detail: SummaryDetailView; onChanged(): void; onError(message: string): void }) {
+function HistoryDetail({ detail, onChanged, onDeleted, onError }: { detail: SummaryDetailView; onChanged(): void; onDeleted(): void; onError(message: string): void }) {
   const current = detail.currentVersion!;
   const [editing, setEditing] = useState(false);
   const [content, setContent] = useState(current.content);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { setContent(current.content); setEditing(false); }, [detail.id, current.id]);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  useEffect(() => { setContent(current.content); setEditing(false); setConfirmingDelete(false); }, [detail.id, current.id]);
   const act = async (operation: () => Promise<unknown>) => { setBusy(true); try { await operation(); onChanged(); } catch (reason) { onError(messageOf(reason)); } finally { setBusy(false); } };
   const regenerate = () => act(async () => {
-    const [conversation, settings] = await Promise.all([window.synapse.sessions.turns(detail.sessionId), window.synapse.settings.read()]);
-    if (conversation.syncStatus !== "synced") throw new Error(conversation.message ?? "Codex 会话尚未同步完成。");
-    const stopTurnId = [...conversation.turns].reverse().find((turn) => turn.status !== "running")?.id;
-    if (!stopTurnId) throw new Error("找不到可重新生成的已完成 turn。");
-    await window.synapse.summaries.regenerate({ documentId: detail.id, selectedTurnIds: detail.selectedTurnIds, profileId: detail.profileId, stopTurnId, model: settings.summaryModel });
+    const settings = await window.synapse.settings.read();
+    await window.synapse.summaries.regenerate({ documentId: detail.id, selectedTurnIds: detail.selectedTurnIds, profileId: detail.profileId, model: settings.summaryModel });
   });
   const save = () => act(() => window.synapse.summaries.updateDraft({ documentId: detail.id, content }));
   const finalize = () => act(() => window.synapse.summaries.finalize({ documentId: detail.id, content, syncToNotes: detail.publicationStatus !== "not-requested" }));
+  const deleteSummary = async () => {
+    if (!confirmingDelete) { setConfirmingDelete(true); return; }
+    setBusy(true);
+    try { await window.synapse.summaries.delete(detail.id); onDeleted(); }
+    catch (reason) { onError(messageOf(reason)); }
+    finally { setBusy(false); }
+  };
   return <>
-    <div className="detail-actions"><button disabled={busy} onClick={() => setEditing((value) => !value)}><NotebookPen size={14} />{editing ? "预览" : "编辑"}</button><button disabled={busy} onClick={regenerate}><RefreshCw size={14} />重新生成</button><button onClick={() => window.synapse.export.markdown(detail.id)}><FileDown size={14} />MD</button><button onClick={() => window.synapse.export.json(detail.id)}><FileDown size={14} />JSON</button>{detail.publicationStatus === "failed" && <button onClick={() => window.synapse.summaries.retryNotes(detail.id)}><RefreshCw size={14} />重试 Notes</button>}</div>
+    <div className="detail-actions"><button disabled={busy} onClick={() => { setConfirmingDelete(false); setEditing((value) => !value); }}><NotebookPen size={14} />{editing ? "预览" : "编辑"}</button><button disabled={busy} onClick={() => { setConfirmingDelete(false); void regenerate(); }}><RefreshCw size={14} />重新生成</button><button disabled={busy} onClick={() => { setConfirmingDelete(false); void window.synapse.export.markdown(detail.id); }}><FileDown size={14} />MD</button><button disabled={busy} onClick={() => { setConfirmingDelete(false); void window.synapse.export.json(detail.id); }}><FileDown size={14} />JSON</button>{detail.publicationStatus === "failed" && <button disabled={busy} onClick={() => { setConfirmingDelete(false); void window.synapse.summaries.retryNotes(detail.id); }}><RefreshCw size={14} />重试 Notes</button>}<button className={`delete-summary-action ${confirmingDelete ? "confirming" : ""}`} disabled={busy} title={confirmingDelete ? "永久删除本地总结；不会删除已同步的 Apple Notes 内容" : "删除总结"} onClick={() => void deleteSummary()}><Trash2 size={14} />{confirmingDelete ? "确认删除" : "删除"}</button></div>
     {editing ? <div className="editor-form history-editor"><label>标题<input value={content.title} onChange={(event) => setContent({ ...content, title: event.target.value })} /></label><label>摘要<textarea rows={3} value={content.abstract} onChange={(event) => setContent({ ...content, abstract: event.target.value })} /></label><label>标签<input value={content.tags.join(", ")} onChange={(event) => setContent({ ...content, tags: event.target.value.split(",").map((value) => value.trim()).filter(Boolean) })} /></label><label>正文<textarea className="markdown-editor" value={content.bodyMarkdown} onChange={(event) => setContent({ ...content, bodyMarkdown: event.target.value })} /></label><div className="row-actions"><button className="secondary" disabled={busy} onClick={save}>保存新草稿</button><button className="primary" disabled={busy} onClick={finalize}>确认新 final</button></div></div> : <article className="markdown-preview"><span className="version-pill">{current.kind}</span><h1>{current.content.title}</h1><p className="abstract">{current.content.abstract}</p><div className="tag-row">{current.content.tags.map((tag) => <span key={tag}>{tag}</span>)}</div><ReactMarkdown>{current.content.bodyMarkdown}</ReactMarkdown></article>}
     <div className="version-history"><strong>版本历史</strong>{detail.versions.map((version) => <span key={version.id}>{version.kind} · {new Date(version.createdAt).toLocaleString()}</span>)}</div>
   </>;

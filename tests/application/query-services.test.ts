@@ -1,20 +1,21 @@
 import { describe, expect, it } from "vitest";
 import { RepositorySessionQueryService } from "@application/query-services";
 import { CodexSessionAggregate } from "@domain/session";
-import { DomainError } from "@domain/shared";
+import { SourceRevision, SummaryDocumentAggregate, SummaryVersion, TurnSelection } from "@domain/summary";
 
 describe("RepositorySessionQueryService", () => {
-  it("surfaces App Server unavailability while returning the Hook cache", async () => {
+  it("serves locally persisted turns without asking App Server to load the thread", async () => {
     const session = CodexSessionAggregate.create("session", "thread", "/repo", "a");
-    session.startTurn({ turnId: "turn", promptPreview: "prompt", at: "b" }); session.completeTurn({ turnId: "turn", assistantPreview: "done", at: "c" });
+    session.startTurn({ turnId: "turn", promptContent: "prompt", at: "b" }); session.completeTurn({ turnId: "turn", assistantContent: "done", at: "c" });
+    const summary = SummaryDocumentAggregate.create({ id: "document", sessionId: "session", profileId: "profile", selection: new TurnSelection(["turn"]), publicationTarget: null, createdAt: "c", updatedAt: "c" });
+    summary.addDraft(new SummaryVersion({ id: "version", documentId: "document", sequence: 0, kind: "agent-draft", content: { title: "Title", abstract: "", bodyMarkdown: "Body", tags: [] }, sourceRevision: new SourceRevision(["turn"], "hash"), model: null, createdAt: "d" }));
     const service = new RepositorySessionQueryService(
       { async findById() { return session; }, async findByThreadId() { return session; }, async save() {}, async listWidgetQueue() { return [session]; }, async search() { return [session]; } },
-      { async saveMany() {}, async listBySessionId() { return session.turns; } },
       { now: () => "d" },
-      { async readConversation() { throw new DomainError("APP_SERVER_UNAVAILABLE", "App Server unavailable"); }, async waitUntilTurnPersisted() { throw new DomainError("APP_SERVER_UNAVAILABLE", "App Server unavailable"); } },
+      { async findById() { return summary; }, async findLatestBySessionId() { return summary; }, async create() {}, async save() {}, async delete() {}, async search() { return { total: 0, items: [] }; } },
     );
     const result = await service.getConversationTurns("session");
-    expect(result).toMatchObject({ source: "hook-cache", syncStatus: "unavailable", message: "App Server unavailable" });
     expect(result.turns[0]?.promptPreview).toBe("prompt");
+    expect((await service.listWidgetQueue())[0]?.summaryDocumentId).toBe("document");
   });
 });

@@ -1,10 +1,9 @@
 import { mkdir } from "node:fs/promises";
-import type { AgentModel, ConversationGateway, HookTrustGateway, HookTrustState, SummaryAgentGateway, SummaryAgentRequest } from "@application/ports";
-import type { CodexConversation, GeneratedSummary } from "@domain/conversation";
+import type { AgentModel, HookTrustGateway, HookTrustState, SummaryAgentGateway, SummaryAgentRequest } from "@application/ports";
+import type { GeneratedSummary } from "@domain/conversation";
 import { DomainError } from "@domain/shared";
 import { z } from "zod";
 import type { CodexAppServerClient, CodexNotification } from "./client";
-import { CodexProtocolMapper } from "./mapper";
 
 const generatedSummarySchema = z.object({
   title: z.string().min(1), abstract: z.string(), bodyMarkdown: z.string(), tags: z.array(z.string()),
@@ -17,22 +16,6 @@ const outputSchema = {
     tags: { type: "array", items: { type: "string" } },
   },
 };
-
-export class AppServerConversationGateway implements ConversationGateway {
-  constructor(private readonly client: CodexAppServerClient, private readonly mapper: CodexProtocolMapper) {}
-  async readConversation(threadId: string): Promise<CodexConversation> {
-    return this.mapper.toConversation(await this.client.request("thread/read", { threadId, includeTurns: true }));
-  }
-  async waitUntilTurnPersisted(threadId: string, turnId: string): Promise<CodexConversation> {
-    for (const delay of [0, 250, 500, 1_000, 2_000]) {
-      if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
-      const conversation = await this.readConversation(threadId);
-      const turn = conversation.turns.find((item) => item.id === turnId);
-      if (turn && turn.status !== "running") return conversation;
-    }
-    throw new DomainError("CONVERSATION_SYNC_PENDING", "会话仍在同步，请稍后重试。");
-  }
-}
 
 interface ActiveTurn { readonly threadId: string; readonly turnId: string; }
 

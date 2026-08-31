@@ -11,7 +11,6 @@ export interface CodexSessionRepository {
 
 export interface CodexTurnRepository {
   saveMany(sessionId: string, turns: readonly CodexTurn[]): Promise<void>;
-  listBySessionId(sessionId: string): Promise<readonly CodexTurn[]>;
 }
 
 export interface HookEventRepository {
@@ -29,5 +28,7 @@ export interface SummaryProfileRepository {
 export interface SummaryDocumentRepository {
   findById(id: string): Promise<SummaryDocumentAggregate | null>;
   findLatestBySessionId(sessionId: string): Promise<SummaryDocumentAggregate | null>;
+  create(document: SummaryDocumentAggregate): Promise<void>;
   save(document: SummaryDocumentAggregate): Promise<void>;
+  delete(id: string): Promise<void>;
 }

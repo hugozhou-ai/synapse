@@ -20,7 +20,6 @@ export interface GenerateSummaryCommand {
   readonly sessionId: string;
   readonly selectedTurnIds: readonly string[];
   readonly profileId: string;
-  readonly stopTurnId: string;
   readonly model: string | null;
   readonly syncToNotes: boolean;
   readonly publicationTarget: PublicationTargetInput | null;
@@ -30,7 +29,6 @@ export interface RegenerateSummaryCommand {
   readonly documentId: string;
   readonly selectedTurnIds: readonly string[];
   readonly profileId: string;
-  readonly stopTurnId: string;
   readonly model: string | null;
 }
 
@@ -70,6 +68,7 @@ export interface WidgetSessionView {
   readonly promptPreview: string;
   readonly elapsedSeconds: number;
   readonly lastCompletedTurnId: string | null;
+  readonly summaryDocumentId: string | null;
 }
 
 export interface TurnSelectionView {
@@ -85,9 +84,6 @@ export interface TurnSelectionView {
 
 export interface ConversationTurnsView {
   readonly turns: readonly TurnSelectionView[];
-  readonly source: "app-server" | "hook-cache";
-  readonly syncStatus: "synced" | "pending" | "unavailable";
-  readonly message: string | null;
 }
 
 export interface SummaryDetailView {
