@@ -1,28 +1,28 @@
-import Database from "better-sqlite3";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { dirname } from "node:path";
 import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import type { Logger } from "@shared/logger";
 
 export interface SynapseDatabase {
-  readonly connection: Database.Database;
+  readonly connection: DatabaseSync;
   readonly path: string;
   execute<T>(operation: () => T): Promise<T>;
   transaction<T>(operation: () => Promise<T>): Promise<T>;
   close(): void;
 }
 
-export class BetterSqliteSynapseDatabase implements SynapseDatabase {
-  readonly connection: Database.Database;
+export class NodeSqliteSynapseDatabase implements SynapseDatabase {
+  readonly connection: DatabaseSync;
   private readonly transactionContext = new AsyncLocalStorage<boolean>();
   private tail: Promise<void> = Promise.resolve();
 
   constructor(readonly path: string, logger: Logger) {
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-    this.connection = new Database(path);
-    this.connection.pragma("journal_mode = WAL");
-    this.connection.pragma("foreign_keys = ON");
-    this.connection.pragma("busy_timeout = 5000");
+    this.connection = new DatabaseSync(path);
+    this.connection.exec("PRAGMA journal_mode = WAL");
+    this.connection.exec("PRAGMA foreign_keys = ON");
+    this.connection.exec("PRAGMA busy_timeout = 5000");
     this.migrate();
     logger.info("[synapse:sqlite]", "database-ready", { path });
   }
@@ -61,10 +61,11 @@ export class BetterSqliteSynapseDatabase implements SynapseDatabase {
         applied_at TEXT NOT NULL
       );
     `);
-    const version = Number(this.connection.pragma("user_version", { simple: true }));
+    const versionRow = this.connection.prepare("PRAGMA user_version").get() as { user_version: number | bigint };
+    const version = Number(versionRow.user_version);
     if (version < 1) {
-      const migrate = this.connection.transaction(() => {
-      this.connection.exec(`
+      this.migrateTransaction(() => {
+        this.connection.exec(`
         CREATE TABLE codex_sessions (
           id TEXT PRIMARY KEY,
           thread_id TEXT NOT NULL UNIQUE,
@@ -193,32 +194,41 @@ export class BetterSqliteSynapseDatabase implements SynapseDatabase {
           cwd,
           tokenize='unicode61'
         );
-      `);
-      const now = new Date().toISOString();
-      this.connection.prepare(`
+        `);
+        const now = new Date().toISOString();
+        this.connection.prepare(`
         INSERT INTO summary_profiles(id, name, kind, instructions, is_default, created_at, updated_at)
         VALUES (?, ?, ?, ?, 1, ?, ?)
-      `).run(
-        "builtin-task-retrospective",
-        "任务复盘",
-        "template",
-        "# {{title}}\n\n## 目标\n\n## 完成内容\n\n## 关键决策\n\n## 文件与命令\n\n## 问题与解决\n\n## 后续事项\n\n保持以上 Markdown 结构，以事实为准，不臆测。",
-        now,
-        now,
-      );
-      this.connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (1, ?)").run(now);
-      this.connection.pragma("user_version = 1");
+        `).run(
+          "builtin-task-retrospective",
+          "任务复盘",
+          "template",
+          "# {{title}}\n\n## 目标\n\n## 完成内容\n\n## 关键决策\n\n## 文件与命令\n\n## 问题与解决\n\n## 后续事项\n\n保持以上 Markdown 结构，以事实为准，不臆测。",
+          now,
+          now,
+        );
+        this.connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (1, ?)").run(now);
+        this.connection.exec("PRAGMA user_version = 1");
       });
-      migrate();
     }
     if (version < 2) {
-      const migrate = this.connection.transaction(() => {
+      this.migrateTransaction(() => {
         this.connection.exec("ALTER TABLE summary_jobs ADD COLUMN stage_coverage_json TEXT NOT NULL DEFAULT '[]'");
         const now = new Date().toISOString();
         this.connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (2, ?)").run(now);
-        this.connection.pragma("user_version = 2");
+        this.connection.exec("PRAGMA user_version = 2");
       });
-      migrate();
+    }
+  }
+
+  private migrateTransaction(operation: () => void): void {
+    this.connection.exec("BEGIN IMMEDIATE");
+    try {
+      operation();
+      this.connection.exec("COMMIT");
+    } catch (error) {
+      this.connection.exec("ROLLBACK");
+      throw error;
     }
   }
 }

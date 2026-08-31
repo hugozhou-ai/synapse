@@ -15,7 +15,7 @@ Synapse 是一个 macOS 优先的 Electron 全局挂件：通过 Codex lifecycle
 
 ## 开发
 
-要求：macOS、Node.js 22+、本地可用的 Codex 或 ChatGPT Desktop 内置 Codex binary。
+要求：macOS、Node.js 22.13+、本地可用的 Codex 或 ChatGPT Desktop 内置 Codex binary。
 
 ```bash
 npm install
@@ -35,7 +35,7 @@ npm run build
 npm run package:mac
 ```
 
-Electron Builder 会为 Electron ABI 重建 `better-sqlite3`；`postpackage:mac` 随后自动恢复本机 Node ABI，避免影响后续 Vitest。
+SQLite 使用 Node 与 Electron 均内置的 `node:sqlite`，开发、测试和打包不需要切换原生模块 ABI。
 
 正式分发需要在 Electron Builder 环境中配置 Developer ID 签名与公证凭据。`build/entitlements.mac.plist` 已包含 Apple Events entitlement。
 

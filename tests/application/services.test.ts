@@ -2,9 +2,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { BetterSqliteSynapseDatabase } from "@infrastructure/sqlite/database";
+import { NodeSqliteSynapseDatabase } from "@infrastructure/sqlite/database";
 import { SqliteCodexSessionRepository, SqliteCodexTurnRepository, SqliteHookEventRepository, SqliteOutboxRepository, SqliteSummaryDocumentRepository, SqliteSummaryJobRepository, SqliteSummaryProfileRepository } from "@infrastructure/sqlite/repositories";
-import { BetterSqliteUnitOfWork } from "@infrastructure/sqlite/unit-of-work";
+import { SqliteUnitOfWork } from "@infrastructure/sqlite/unit-of-work";
 import { ArbitraryTurnSelectionService, DefaultSessionLifecycleService, NormalizedTurnSummaryContextService } from "@domain/services";
 import { HookBasedSessionAwarenessService } from "@application/session-services";
 import { ProfileDrivenSummaryGenerationService, VersionedSummaryFinalizationService } from "@application/summary-services";
@@ -24,7 +24,7 @@ describe("application services", () => {
     try {
       const sessions = new SqliteCodexSessionRepository(database); const turns = new SqliteCodexTurnRepository(database);
       let id = 0;
-      const service = new HookBasedSessionAwarenessService(new DefaultSessionLifecycleService(), sessions, turns, new SqliteHookEventRepository(database), new SqliteOutboxRepository(database), new BetterSqliteUnitOfWork(database), { now: () => "2026-01-01T00:00:01.000Z" }, { next: () => `id-${++id}` });
+      const service = new HookBasedSessionAwarenessService(new DefaultSessionLifecycleService(), sessions, turns, new SqliteHookEventRepository(database), new SqliteOutboxRepository(database), new SqliteUnitOfWork(database), { now: () => "2026-01-01T00:00:01.000Z" }, { next: () => `id-${++id}` });
       const event = { eventType: "UserPromptSubmit" as const, sessionId: "session", threadId: "thread", turnId: "turn", cwd: "/repo", model: null, promptPreview: "prompt", assistantPreview: "", occurredAt: "2026-01-01T00:00:00.000Z", payloadHash: "hash" };
       expect((await service.ingest(event)).duplicate).toBe(false);
       expect((await service.ingest(event)).duplicate).toBe(true);
@@ -43,7 +43,7 @@ describe("application services", () => {
       document.addDraft(new SummaryVersion({ id: "draft", documentId: "doc", sequence: 0, kind: "agent-draft", content: { title: "Title", abstract: "Abstract", bodyMarkdown: "Body", tags: [] }, sourceRevision: new SourceRevision(["turn"], "hash"), model: null, createdAt: "e" }));
       await summaries.save(document);
       let id = 0;
-      const service = new VersionedSummaryFinalizationService(summaries, sessions, outbox, new BetterSqliteUnitOfWork(database), { now: () => "2026-01-01T00:00:00.000Z" }, { next: () => `final-id-${++id}` });
+      const service = new VersionedSummaryFinalizationService(summaries, sessions, outbox, new SqliteUnitOfWork(database), { now: () => "2026-01-01T00:00:00.000Z" }, { next: () => `final-id-${++id}` });
       const final = await service.finalize({ documentId: "doc", content: { title: "Edited", abstract: "Abstract", bodyMarkdown: "Final", tags: ["tag"] }, syncToNotes: true });
       expect(final.isFinal).toBe(true);
       expect((await summaries.findById("doc"))?.snapshot.versions).toHaveLength(2);
@@ -82,7 +82,7 @@ describe("application services", () => {
         { async readConversation() { return conversation(); }, async waitUntilTurnPersisted() { return conversation(); } },
         new ArbitraryTurnSelectionService(), new NormalizedTurnSummaryContextService(new NodeContentHashService()),
         { async generate() { return { title: "New", abstract: "", bodyMarkdown: "Body", tags: [], model: null, stages: [{ kind: "final", turnIds: ["turn-2"] }] }; }, async cancel() {}, async listModels() { return []; } },
-        profiles, summaries, sessions, jobs, new BetterSqliteUnitOfWork(database), { now: () => "g" }, { next: () => `generated-${++id}` },
+        profiles, summaries, sessions, jobs, new SqliteUnitOfWork(database), { now: () => "g" }, { next: () => `generated-${++id}` },
       );
       await service.regenerate({ documentId: "doc", selectedTurnIds: ["turn-2"], profileId: "new-profile", stopTurnId: "turn-2", model: null });
       const saved = await summaries.findById("doc");
@@ -102,5 +102,5 @@ function conversation() {
 
 async function testDatabase() {
   const root = await mkdtemp(join(tmpdir(), "synapse-application-")); directories.push(root);
-  return { database: new BetterSqliteSynapseDatabase(join(root, "db.sqlite3"), logger) };
+  return { database: new NodeSqliteSynapseDatabase(join(root, "db.sqlite3"), logger) };
 }

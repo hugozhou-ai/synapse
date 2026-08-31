@@ -16,9 +16,9 @@ import { FileSystemHookEventSpool } from "@infrastructure/hooks/spool";
 import { JsonFileLogger } from "@infrastructure/logging/json-file-logger";
 import { NotesOutboxWorker } from "@infrastructure/notes/outbox-worker";
 import { AppleNotesSummaryPublisher } from "@infrastructure/notes/publisher";
-import { BetterSqliteSynapseDatabase } from "@infrastructure/sqlite/database";
+import { NodeSqliteSynapseDatabase } from "@infrastructure/sqlite/database";
 import { SqliteCodexSessionRepository, SqliteCodexTurnRepository, SqliteHookEventRepository, SqliteOutboxRepository, SqlitePublicationRepository, SqliteSettingsRepository, SqliteSummaryDocumentRepository, SqliteSummaryJobRepository, SqliteSummaryProfileRepository } from "@infrastructure/sqlite/repositories";
-import { BetterSqliteUnitOfWork } from "@infrastructure/sqlite/unit-of-work";
+import { SqliteUnitOfWork } from "@infrastructure/sqlite/unit-of-work";
 import { NodeContentHashService, SystemClock, UuidGenerator } from "@infrastructure/system";
 import { CompositeLogger, JsonConsoleLogger, type Logger } from "@shared/logger";
 
@@ -39,7 +39,7 @@ export class ElectronApplicationContainer {
 
   private constructor(
     services: Omit<ElectronApplicationContainer, "close">,
-    private readonly database: BetterSqliteSynapseDatabase,
+    private readonly database: NodeSqliteSynapseDatabase,
     private readonly appServer: LazyCodexAppServerRuntime,
   ) { Object.assign(this, services); }
 
@@ -51,7 +51,7 @@ export class ElectronApplicationContainer {
     ]);
     const clock = new SystemClock(); const ids = new UuidGenerator();
     const databasePath = join(supportDirectory, "synapse.sqlite3");
-    const database = new BetterSqliteSynapseDatabase(databasePath, logger);
+    const database = new NodeSqliteSynapseDatabase(databasePath, logger);
     const sessions = new SqliteCodexSessionRepository(database);
     const turns = new SqliteCodexTurnRepository(database);
     const hookEvents = new SqliteHookEventRepository(database);
@@ -61,7 +61,7 @@ export class ElectronApplicationContainer {
     const publications = new SqlitePublicationRepository(database);
     const outbox = new SqliteOutboxRepository(database);
     const settingsRepository = new SqliteSettingsRepository(database);
-    const unitOfWork = new BetterSqliteUnitOfWork(database);
+    const unitOfWork = new SqliteUnitOfWork(database);
 
     const awareness = new HookBasedSessionAwarenessService(new DefaultSessionLifecycleService(), sessions, turns, hookEvents, outbox, unitOfWork, clock, ids);
     const settingsValue = await settingsRepository.read();

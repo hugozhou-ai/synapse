@@ -2,9 +2,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { BetterSqliteSynapseDatabase } from "@infrastructure/sqlite/database";
+import { NodeSqliteSynapseDatabase } from "@infrastructure/sqlite/database";
 import { SqliteCodexSessionRepository, SqliteCodexTurnRepository, SqliteSettingsRepository, SqliteSummaryDocumentRepository, SqliteSummaryProfileRepository } from "@infrastructure/sqlite/repositories";
-import { BetterSqliteUnitOfWork } from "@infrastructure/sqlite/unit-of-work";
+import { SqliteUnitOfWork } from "@infrastructure/sqlite/unit-of-work";
 import { CodexSessionAggregate } from "@domain/session";
 import { SourceRevision, SummaryDocumentAggregate, SummaryVersion, TurnSelection } from "@domain/summary";
 import type { Logger } from "@shared/logger";
@@ -16,7 +16,7 @@ afterEach(async () => { for (const directory of directories.splice(0)) await rm(
 describe("SQLite repository contract", () => {
   it("migrates, restores aggregates, retains versions, and indexes the current summary in FTS5", async () => {
     const root = await mkdtemp(join(tmpdir(), "synapse-sqlite-")); directories.push(root);
-    const database = new BetterSqliteSynapseDatabase(join(root, "synapse.sqlite3"), logger);
+    const database = new NodeSqliteSynapseDatabase(join(root, "synapse.sqlite3"), logger);
     try {
       const sessions = new SqliteCodexSessionRepository(database); const turns = new SqliteCodexTurnRepository(database);
       const profiles = new SqliteSummaryProfileRepository(database); const summaries = new SqliteSummaryDocumentRepository(database);
@@ -41,10 +41,10 @@ describe("SQLite repository contract", () => {
 
   it("holds the connection-wide queue until an asynchronous transaction rolls back", async () => {
     const root = await mkdtemp(join(tmpdir(), "synapse-sqlite-uow-")); directories.push(root);
-    const database = new BetterSqliteSynapseDatabase(join(root, "synapse.sqlite3"), logger);
+    const database = new NodeSqliteSynapseDatabase(join(root, "synapse.sqlite3"), logger);
     try {
       const sessions = new SqliteCodexSessionRepository(database); const settings = new SqliteSettingsRepository(database);
-      const unitOfWork = new BetterSqliteUnitOfWork(database);
+      const unitOfWork = new SqliteUnitOfWork(database);
       let entered!: () => void; const enteredTransaction = new Promise<void>((resolve) => { entered = resolve; });
       let unblock!: () => void; const blocker = new Promise<void>((resolve) => { unblock = resolve; });
       const transaction = unitOfWork.execute(async () => {

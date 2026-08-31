@@ -4,21 +4,23 @@
   "private": true,
   "description": "A macOS Codex session widget and summary workspace.",
   "author": "Synapse Contributors",
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "main": "out/main/index.js",
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "build": "npm run typecheck && electron-vite build",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "test": "node scripts/test.mjs run",
+    "test:watch": "node scripts/test.mjs",
     "lint:architecture": "node scripts/check-architecture.mjs",
     "check": "npm run typecheck && npm run lint:architecture && npm test",
     "package:mac": "node scripts/package-mac.mjs"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",
-    "better-sqlite3": "^12.2.0",
     "lucide-react": "^0.542.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
@@ -28,7 +30,6 @@
   "devDependencies": {
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.6",
-    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^24.3.0",
     "@types/react": "^19.1.12",
     "@types/react-dom": "^19.1.9",
@@ -44,11 +45,6 @@
   "build": {
     "appId": "com.synapse.codex",
     "productName": "Synapse",
-    "npmRebuild": false,
-    "afterPack": "scripts/verify-packaged-native.cjs",
-    "asarUnpack": [
-      "node_modules/better-sqlite3/**"
-    ],
     "files": [
       "out/**",
       "package.json"

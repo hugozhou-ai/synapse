@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { electronVite, rebuildForElectron, rebuildForNode, repositoryRoot } from "./native-runtime.mjs";
+import { electronVite, repositoryRoot } from "./build-tools.mjs";
 
 let child = null;
 const forwardSignal = (signal) => {
@@ -12,7 +12,6 @@ process.on("SIGTERM", onTerminate);
 
 let exitCode = 0;
 try {
-  rebuildForElectron();
   child = spawn(electronVite, ["dev"], { cwd: repositoryRoot, stdio: "inherit", env: process.env });
   const result = await new Promise((resolve, reject) => {
     child.once("error", reject);
@@ -22,7 +21,6 @@ try {
 } finally {
   process.off("SIGINT", onInterrupt);
   process.off("SIGTERM", onTerminate);
-  rebuildForNode();
 }
 
 process.exitCode = exitCode;

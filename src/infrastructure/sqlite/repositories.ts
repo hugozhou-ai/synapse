@@ -5,6 +5,7 @@ import type {
   PublicationRecord, PublicationRepository, SettingsRepository, SummaryDocumentRepository, SummaryJob, SummaryJobRepository,
   SummaryProfileRepository, SummarySearchCriteria, SummarySearchResult,
 } from "@application/ports";
+import type { SQLInputValue } from "node:sqlite";
 import type { SynapseDatabase } from "./database";
 
 type Row = Record<string, unknown>;
@@ -25,7 +26,19 @@ export class SqliteCodexSessionRepository implements CodexSessionRepository {
       ON CONFLICT(id) DO UPDATE SET thread_id=excluded.thread_id,cwd=excluded.cwd,model=excluded.model,title=excluded.title,
         status=excluded.status,last_event_at=excluded.last_event_at,last_completed_turn_id=excluded.last_completed_turn_id,
         summarized_at=excluded.summarized_at,ignored_at=excluded.ignored_at,sort_at=excluded.sort_at
-      `).run(p);
+      `).run({
+        id: p.id,
+        threadId: p.threadId,
+        cwd: p.cwd,
+        model: p.model,
+        title: p.title,
+        status: p.status,
+        lastEventAt: p.lastEventAt,
+        lastCompletedTurnId: p.lastCompletedTurnId,
+        summarizedAt: p.summarizedAt,
+        ignoredAt: p.ignoredAt,
+        sortAt: p.sortAt,
+      });
     });
   }
 
@@ -37,7 +50,7 @@ export class SqliteCodexSessionRepository implements CodexSessionRepository {
 
   async search(input: { status?: string; cwd?: string; limit: number; offset: number }): Promise<readonly CodexSessionAggregate[]> {
     return this.db.execute(() => {
-      const clauses: string[] = []; const values: unknown[] = [];
+      const clauses: string[] = []; const values: SQLInputValue[] = [];
       if (input.status) { clauses.push("status = ?"); values.push(input.status); }
       if (input.cwd) { clauses.push("cwd = ?"); values.push(input.cwd); }
       values.push(input.limit, input.offset);
@@ -45,18 +58,18 @@ export class SqliteCodexSessionRepository implements CodexSessionRepository {
     });
   }
 
-  private find(where: string, value: unknown): CodexSessionAggregate | null {
+  private find(where: string, value: SQLInputValue): CodexSessionAggregate | null {
     const row = this.db.connection.prepare(`SELECT * FROM codex_sessions WHERE ${where}`).get(value) as Row | undefined;
     return row ? this.map(row) : null;
   }
 
-  private listRows(suffix: string, ...values: unknown[]): readonly CodexSessionAggregate[] {
+  private listRows(suffix: string, ...values: SQLInputValue[]): readonly CodexSessionAggregate[] {
     const rows = this.db.connection.prepare(`SELECT * FROM codex_sessions ${suffix}`).all(...values) as Row[];
     return rows.map((row) => this.map(row));
   }
 
   private map(row: Row): CodexSessionAggregate {
-    const turns = this.db.connection.prepare("SELECT * FROM codex_turns WHERE session_id = ? ORDER BY sequence").all(row.id) as Row[];
+    const turns = this.db.connection.prepare("SELECT * FROM codex_turns WHERE session_id = ? ORDER BY sequence").all(String(row.id)) as Row[];
     const props: CodexSessionProps = {
       id: String(row.id), threadId: String(row.thread_id), cwd: String(row.cwd), model: row.model === null ? null : String(row.model),
       title: row.title === null ? null : String(row.title), status: String(row.status) as SessionStatus,
@@ -162,7 +175,7 @@ export class SqliteSummaryDocumentRepository implements SummaryDocumentRepositor
 
   async search(input: SummarySearchCriteria): Promise<SummarySearchResult> {
     return this.db.execute(() => {
-      const clauses: string[] = ["d.current_version_id = v.id"]; const args: unknown[] = [];
+      const clauses: string[] = ["d.current_version_id = v.id"]; const args: SQLInputValue[] = [];
       let from = "summary_documents d JOIN summary_versions v ON v.document_id=d.id JOIN codex_sessions s ON s.id=d.session_id";
       if (input.text?.trim()) { from += " JOIN summary_fts f ON f.document_id=d.id"; clauses.push("summary_fts MATCH ?"); args.push(toFtsQuery(input.text)); }
       if (input.cwd) { clauses.push("s.cwd = ?"); args.push(input.cwd); }
@@ -181,10 +194,10 @@ export class SqliteSummaryDocumentRepository implements SummaryDocumentRepositor
     });
   }
 
-  private find(where: string, value: unknown): SummaryDocumentAggregate | null {
+  private find(where: string, value: SQLInputValue): SummaryDocumentAggregate | null {
     const row = this.db.connection.prepare(`SELECT d.* FROM summary_documents d WHERE ${where} LIMIT 1`).get(value) as Row | undefined;
     if (!row) return null;
-    const versions = (this.db.connection.prepare("SELECT * FROM summary_versions WHERE document_id = ? ORDER BY sequence").all(row.id) as Row[]).map(mapVersion);
+    const versions = (this.db.connection.prepare("SELECT * FROM summary_versions WHERE document_id = ? ORDER BY sequence").all(String(row.id)) as Row[]).map(mapVersion);
     return new SummaryDocumentAggregate({
       id: String(row.id), sessionId: String(row.session_id), profileId: String(row.profile_id),
       selection: new TurnSelection(parseJson<string[]>(row.selected_turn_ids_json)), versions,

@@ -1,9 +1,4 @@
-import { electronBuilder, rebuildForElectron, rebuildForNode, run, runNpm } from "./native-runtime.mjs";
+import { electronBuilder, run, runNpm } from "./build-tools.mjs";
 
-try {
-  rebuildForElectron();
-  runNpm(["run", "build"]);
-  run(electronBuilder, ["--mac"]);
-} finally {
-  rebuildForNode();
-}
+runNpm(["run", "build"]);
+run(electronBuilder, ["--mac"]);

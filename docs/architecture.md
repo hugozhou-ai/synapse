@@ -47,7 +47,7 @@
 - `PublicationRepository` → `SqlitePublicationRepository`
 - `OutboxRepository` → `SqliteOutboxRepository`
 - `SettingsRepository` → `SqliteSettingsRepository`
-- `UnitOfWork` → `BetterSqliteUnitOfWork`
+- `UnitOfWork` → `SqliteUnitOfWork`
 
 外部系统：
 
