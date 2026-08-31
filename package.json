@@ -14,8 +14,7 @@
     "test:watch": "vitest",
     "lint:architecture": "node scripts/check-architecture.mjs",
     "check": "npm run typecheck && npm run lint:architecture && npm test",
-    "package:mac": "npm run build && electron-builder --mac",
-    "postpackage:mac": "npm rebuild better-sqlite3"
+    "package:mac": "node scripts/package-mac.mjs"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",
@@ -45,6 +44,8 @@
   "build": {
     "appId": "com.synapse.codex",
     "productName": "Synapse",
+    "npmRebuild": false,
+    "afterPack": "scripts/verify-packaged-native.cjs",
     "asarUnpack": [
       "node_modules/better-sqlite3/**"
     ],
