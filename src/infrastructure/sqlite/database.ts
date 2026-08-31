@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { dirname } from "node:path";
 import { mkdirSync } from "node:fs";
 import type { Logger } from "@shared/logger";
@@ -6,11 +7,15 @@ import type { Logger } from "@shared/logger";
 export interface SynapseDatabase {
   readonly connection: Database.Database;
   readonly path: string;
+  execute<T>(operation: () => T): Promise<T>;
+  transaction<T>(operation: () => Promise<T>): Promise<T>;
   close(): void;
 }
 
 export class BetterSqliteSynapseDatabase implements SynapseDatabase {
   readonly connection: Database.Database;
+  private readonly transactionContext = new AsyncLocalStorage<boolean>();
+  private tail: Promise<void> = Promise.resolve();
 
   constructor(readonly path: string, logger: Logger) {
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
@@ -23,6 +28,31 @@ export class BetterSqliteSynapseDatabase implements SynapseDatabase {
   }
 
   close(): void { this.connection.close(); }
+
+  execute<T>(operation: () => T): Promise<T> {
+    if (this.transactionContext.getStore()) return Promise.resolve(operation());
+    return this.enqueue(operation);
+  }
+
+  transaction<T>(operation: () => Promise<T>): Promise<T> {
+    return this.enqueue(async () => {
+      this.connection.exec("BEGIN IMMEDIATE");
+      try {
+        const result = await this.transactionContext.run(true, operation);
+        this.connection.exec("COMMIT");
+        return result;
+      } catch (error) {
+        this.connection.exec("ROLLBACK");
+        throw error;
+      }
+    });
+  }
+
+  private enqueue<T>(operation: () => T | Promise<T>): Promise<T> {
+    const result = this.tail.then(operation, operation);
+    this.tail = result.then(() => undefined, () => undefined);
+    return result;
+  }
 
   private migrate(): void {
     this.connection.exec(`

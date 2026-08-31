@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { PublicationReceipt, PublishSummaryRequest, SummaryPublisher } from "@application/ports";
+import type { NotesTargetGateway, PublicationReceipt, PublishSummaryRequest, SummaryPublisher } from "@application/ports";
+import type { NotesTargetsView } from "@application/contracts";
 import type { Logger } from "@shared/logger";
 
 const execFileAsync = promisify(execFile);
@@ -14,7 +15,7 @@ export class OsascriptExecutor implements AppleScriptExecutor {
   }
 }
 
-export class AppleNotesSummaryPublisher implements SummaryPublisher {
+export class AppleNotesSummaryPublisher implements SummaryPublisher, NotesTargetGateway {
   readonly kind = "apple-notes" as const;
   constructor(
     private readonly scriptPath: string,
@@ -22,8 +23,16 @@ export class AppleNotesSummaryPublisher implements SummaryPublisher {
     private readonly executor: AppleScriptExecutor = new OsascriptExecutor(),
   ) {}
 
+  async listTargets(): Promise<NotesTargetsView> {
+    const stdout = await this.executor.execute(this.scriptPath, JSON.stringify({ action: "listTargets" }));
+    const parsed = JSON.parse(stdout.trim()) as NotesTargetsView;
+    if (!Array.isArray(parsed.accounts)) throw new Error("Apple Notes returned an invalid target list.");
+    return parsed;
+  }
+
   async publish(request: PublishSummaryRequest): Promise<PublicationReceipt> {
     const payload = JSON.stringify({
+      action: "publish",
       account: request.target.account,
       folder: request.target.folder,
       title: request.version.props.content.title,

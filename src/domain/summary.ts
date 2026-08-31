@@ -104,6 +104,20 @@ export class SummaryDocumentAggregate {
     };
   }
 
+  addRegeneratedDraft(version: SummaryVersion, profileId: string, selection: TurnSelection): void {
+    if (!profileId) throw new DomainError("PROFILE_REQUIRED", "A regenerated summary requires a profile.");
+    if (version.isFinal) throw new DomainError("DRAFT_EXPECTED", "A final version cannot be added as a regenerated draft.");
+    this.assertVersion(version);
+    this.props = {
+      ...this.props,
+      profileId,
+      selection,
+      versions: [...this.props.versions, version],
+      currentVersionId: version.props.id,
+      updatedAt: version.props.createdAt,
+    };
+  }
+
   finalize(version: SummaryVersion, publish: boolean): void {
     if (!version.isFinal) throw new DomainError("FINAL_EXPECTED", "Finalization requires an immutable final version.");
     this.assertVersion(version);

@@ -16,7 +16,7 @@ const regenerateSchema = z.object({ documentId: idSchema, selectedTurnIds: z.arr
 const settingsSchema = z.object({
   codexBinaryPath: z.string().nullable(), summaryModel: z.string().nullable(), syncNotesByDefault: z.boolean(),
   notesAccount: z.string().nullable(), notesFolder: z.string().min(1), widgetVisible: z.boolean(),
-  widgetPositions: z.record(z.string(), z.object({ x: z.number(), y: z.number() })),
+  widgetPositions: z.record(z.string(), z.object({ x: z.number(), y: z.number() })), widgetDisplayId: z.string().nullable(),
 }).partial();
 
 export class ElectronIpcController {
@@ -44,6 +44,7 @@ export class ElectronIpcController {
     this.handle("settings:read", z.unknown(), () => this.container.settings.read());
     this.handle("settings:update", settingsSchema, (value) => this.container.settings.update(compactObject<Partial<ApplicationSettings>>(value)));
     this.handle("settings:models", z.unknown(), () => this.container.settings.listModels());
+    this.handle("settings:notes-targets", z.unknown(), () => this.container.settings.listNotesTargets());
     this.handle("settings:runtime", z.unknown(), () => this.container.settings.runtime());
     this.handle("hooks:inspect", z.unknown(), () => this.container.hookManagement.inspect());
     this.handle("hooks:install", z.unknown(), () => this.container.hookManagement.install());

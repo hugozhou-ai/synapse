@@ -53,7 +53,8 @@ export class JsonCodexHookConfigStore implements CodexHookConfigStore {
     await this.backupIfPresent(this.hooksPath);
     await atomicWrite(this.hooksPath, `${JSON.stringify(root, null, 2)}\n`, 0o600);
 
-    const featureEnabledByInstaller = existingManifest?.featureEnabledByInstaller === true || await this.enableHooksFeature();
+    const featureChanged = await this.enableHooksFeature();
+    const featureEnabledByInstaller = existingManifest?.featureEnabledByInstaller === true || featureChanged;
     const manifest: HookInstallManifest = { command: spec.command, featureEnabledByInstaller, installedAt: new Date().toISOString() };
     await atomicWrite(this.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 0o600);
     this.logger.info("[synapse:hook]", "hooks-installed", { hooksPath: this.hooksPath, relayPath: spec.command });
@@ -109,6 +110,7 @@ export class JsonCodexHookConfigStore implements CodexHookConfigStore {
   private async disableHooksFeature(): Promise<void> {
     let content: string;
     try { content = await readFile(this.configPath, "utf8"); } catch (error) { if (isNotFound(error)) return; throw error; }
+    if (!isHooksFeatureEnabled(content)) return;
     const mutation = mutateTomlFeature(content, false);
     if (mutation.changed) await atomicWrite(this.configPath, mutation.content, 0o600);
   }
@@ -120,6 +122,19 @@ export class JsonCodexHookConfigStore implements CodexHookConfigStore {
       await copyFile(path, join(this.supportDirectory, `${basename(path)}.${stamp}.bak`));
     } catch (error) { if (!isNotFound(error)) throw error; }
   }
+}
+
+function isHooksFeatureEnabled(content: string): boolean {
+  const lines = content.split("\n");
+  const sectionIndex = lines.findIndex((line) => line.trim() === "[features]");
+  if (sectionIndex < 0) return false;
+  for (let index = sectionIndex + 1; index < lines.length; index += 1) {
+    const line = lines[index]!;
+    if (/^\s*\[/.test(line)) break;
+    if (/^\s*hooks\s*=\s*true\s*(#.*)?$/.test(line)) return true;
+    if (/^\s*hooks\s*=/.test(line)) return false;
+  }
+  return false;
 }
 
 function quoteCommand(path: string): string { return `'${path.replaceAll("'", `'\\''`)}'`; }

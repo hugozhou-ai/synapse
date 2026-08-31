@@ -5,6 +5,14 @@ function run(argv) {
   Notes.includeStandardAdditions = true;
 
   const accounts = Notes.accounts();
+  if (request.action === "listTargets") {
+    return JSON.stringify({
+      accounts: accounts.map((account) => ({
+        name: account.name(),
+        folders: account.folders().map((folder) => folder.name()),
+      })),
+    });
+  }
   const account = request.account
     ? accounts.find((candidate) => candidate.name() === request.account)
     : accounts[0];

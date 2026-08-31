@@ -44,7 +44,7 @@ Electron Builder 会为 Electron ABI 重建 `better-sqlite3`；`postpackage:mac`
 1. 打开“设置 → Codex Hook”，点击“安装 Hook”。Synapse 会备份并原子合并 `~/.codex/hooks.json`，并在 `[features]` 中启用规范的 `hooks = true`。
 2. 在 Codex 中输入 `/hooks`，检查来源并信任 `Managed by Synapse` 的三个 Hook。Synapse 不会绕过 Codex 的信任机制。
 3. 重启或恢复一个 Codex 任务。提交 prompt 后挂件应立即显示进行中，Stop 后卡片置顶并出现“总结”。
-4. 如需 Apple Notes，在设置中填写账户/文件夹，并在 macOS 首次权限提示中允许 Synapse 控制“便签”。
+4. 如需 Apple Notes，在设置中从已发现的账户/文件夹中选择目标（也可新建文件夹），并在 macOS 首次权限提示中允许 Synapse 控制“便签”。
 
 卸载 Hook 只会删除 manifest 标记的 Synapse handler；用户原有配置保持不变。
 

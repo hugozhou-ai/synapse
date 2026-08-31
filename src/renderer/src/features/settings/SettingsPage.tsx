@@ -1,0 +1,55 @@
+import { useCallback, useEffect, useState } from "react";
+import { BookOpen, Code2, NotebookPen, Plus, Sparkles, Trash2, X } from "lucide-react";
+import type { AgentModel, ApplicationSettings, AppServerRuntimeStatus, HookInstallationStatus } from "@application/ports";
+import type { NotesTargetsView, SummaryProfileView } from "@application/contracts";
+import { ErrorBanner, PageHeader } from "../../components/common";
+import { NotesTargetPicker } from "../../components/NotesTargetPicker";
+import { messageOf, shortPath } from "../../lib/format";
+
+export function SettingsPage() {
+  const [settings, setSettings] = useState<ApplicationSettings | null>(null);
+  const [hooks, setHooks] = useState<HookInstallationStatus | null>(null);
+  const [profiles, setProfiles] = useState<readonly SummaryProfileView[]>([]);
+  const [models, setModels] = useState<readonly AgentModel[]>([]);
+  const [notesTargets, setNotesTargets] = useState<NotesTargetsView | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notesError, setNotesError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [runtime, setRuntime] = useState<AppServerRuntimeStatus | null>(null);
+  const [editing, setEditing] = useState<SummaryProfileView | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  const reload = useCallback(() => {
+    void Promise.all([window.synapse.settings.read(), window.synapse.settings.runtime(), window.synapse.hooks.inspect(), window.synapse.profiles.list()])
+      .then(([nextSettings, nextRuntime, nextHooks, nextProfiles]) => { setSettings(nextSettings); setRuntime(nextRuntime); setHooks(nextHooks); setProfiles(nextProfiles); })
+      .catch((reason) => setError(messageOf(reason)));
+    void window.synapse.settings.models().then(setModels).catch((reason) => setError(messageOf(reason)));
+    void window.synapse.settings.notesTargets().then((value) => { setNotesTargets(value); setNotesError(null); }).catch((reason) => setNotesError(messageOf(reason)));
+  }, []);
+  useEffect(reload, [reload]);
+  useEffect(() => {
+    if (runtime?.state !== "initializing") return;
+    const timer = window.setInterval(() => void window.synapse.settings.runtime().then(setRuntime), 1_000);
+    return () => window.clearInterval(timer);
+  }, [runtime?.state]);
+
+  const save = async () => { if (!settings) return; setSaving(true); try { setSettings(await window.synapse.settings.update(settings)); } catch (reason) { setError(messageOf(reason)); } finally { setSaving(false); } };
+  const hookAction = async (install: boolean) => { setSaving(true); try { setHooks(install ? await window.synapse.hooks.install() : await window.synapse.hooks.uninstall()); } catch (reason) { setError(messageOf(reason)); } finally { setSaving(false); } };
+  const saveProfile = async () => { if (!editing) return; try { await window.synapse.profiles.save(editing); setEditing(null); setConfirmingDelete(false); reload(); } catch (reason) { setError(messageOf(reason)); } };
+  const deleteProfile = async () => {
+    if (!editing?.id || editing.id === "builtin-task-retrospective") return;
+    if (!confirmingDelete) { setConfirmingDelete(true); return; }
+    try { await window.synapse.profiles.delete(editing.id); setEditing(null); setConfirmingDelete(false); reload(); } catch (reason) { setError(messageOf(reason)); }
+  };
+  const runtimeLabel = runtime?.state === "initializing" ? "连接中" : runtime?.available ? "已连接" : "不可用";
+
+  return <div className="page settings-page">
+    <PageHeader eyebrow="CONFIGURATION" title="设置" description="外部系统均通过基础设施适配器连接；修改 Codex binary 后请重启 Synapse 以重新握手。" actions={<button className="primary" disabled={saving} onClick={save}>保存设置</button>} />
+    {error && <ErrorBanner message={error} />}
+    <section className="settings-section"><div className="settings-title"><div className="setting-icon"><Code2 size={18} /></div><div><h2>Codex App Server</h2><p>只用于读取 turns 与按需运行总结 agent。</p></div><span className={`health ${runtime?.available ? "good" : "warn"}`}>{runtimeLabel}</span></div><div className="runtime-grid"><span><small>实际 binary</small><code>{runtime?.binaryPath ?? "—"}</code></span><span><small>版本</small><code>{runtime?.version ?? "—"}</code></span><span><small>认证</small><code>{runtime?.authentication ?? "unknown"}</code></span></div>{runtime?.error && <ErrorBanner message={runtime.error} />}<div className="settings-fields"><label>Codex binary 路径<input value={settings?.codexBinaryPath ?? ""} placeholder="自动发现" onChange={(event) => settings && setSettings({ ...settings, codexBinaryPath: event.target.value || null })} /></label><label>总结模型<select value={settings?.summaryModel ?? ""} disabled={runtime?.state === "initializing"} onChange={(event) => settings && setSettings({ ...settings, summaryModel: event.target.value || null })}><option value="">使用 Codex 默认模型</option>{settings?.summaryModel && !models.some((model) => model.id === settings.summaryModel) && <option value={settings.summaryModel}>{settings.summaryModel}</option>}{models.map((model) => <option value={model.id} key={model.id}>{model.displayName}{model.isDefault ? "（默认）" : ""}</option>)}</select></label></div></section>
+    <section className="settings-section"><div className="settings-title"><div className="setting-icon orange"><Sparkles size={18} /></div><div><h2>Codex Hook</h2><p>SessionStart、UserPromptSubmit 与 Stop；安装操作会备份并原子合并现有配置。</p></div><span className={`health ${hooks?.installed ? "good" : "warn"}`}>{hooks?.installed ? "已安装" : "未安装"}</span></div><div className="hook-paths"><code>{hooks?.relayPath}</code><code>{hooks?.configPath}</code></div>{hooks?.message && <ErrorBanner message={hooks.message} />}{hooks && hooks.trustStates.length > 0 && <div className="trust-list">{hooks.trustStates.map((state) => <span key={state.cwd}><code>{shortPath(state.cwd)}</code><em className={state.status}>{state.status}</em></span>)}</div>}<div className="row-actions">{hooks?.installed ? <button className="danger" onClick={() => hookAction(false)}><Trash2 size={14} />卸载自有 Hook</button> : <button className="primary" onClick={() => hookAction(true)}><Plus size={14} />安装 Hook</button>}</div></section>
+    <section className="settings-section"><div className="settings-title"><div className="setting-icon sage"><NotebookPen size={18} /></div><div><h2>Apple Notes</h2><p>仅在 final 版本提交后同步，同一文档持续更新同一便签。</p></div></div><label className="toggle-row"><input type="checkbox" checked={settings?.syncNotesByDefault ?? false} onChange={(event) => settings && setSettings({ ...settings, syncNotesByDefault: event.target.checked })} /><span className="toggle" /><div><strong>默认同步到便签</strong><small>总结面板仍可单次覆盖</small></div></label>{notesError && <ErrorBanner message={`无法读取 Notes 目标：${notesError}`} />}{settings && <NotesTargetPicker targets={notesTargets} account={settings.notesAccount ?? ""} folder={settings.notesFolder} onAccountChange={(value) => setSettings({ ...settings, notesAccount: value || null })} onFolderChange={(value) => setSettings({ ...settings, notesFolder: value })} />}</section>
+    <section className="settings-section"><div className="settings-title"><div className="setting-icon ink"><BookOpen size={18} /></div><div><h2>整理方案</h2><p>模板型保持 Markdown 骨架，系统提示词型提供完整规则。</p></div><button className="secondary push" onClick={() => { setConfirmingDelete(false); setEditing({ id: "", name: "", kind: "template", instructions: "", isDefault: false }); }}><Plus size={14} />新建</button></div><div className="profile-list">{profiles.map((profile) => <button key={profile.id} onClick={() => { setConfirmingDelete(false); setEditing(profile); }}><div><strong>{profile.name}</strong><span>{profile.kind === "template" ? "Markdown 模板" : "系统提示词"}</span></div>{profile.isDefault && <em>默认</em>}</button>)}</div></section>
+    {editing && <div className="modal-backdrop" role="presentation"><div className="profile-modal" role="dialog" aria-modal="true" aria-label={editing.id ? "编辑整理方案" : "新建整理方案"}><div className="panel-head"><h2>{editing.id ? "编辑整理方案" : "新建整理方案"}</h2><button className="icon-button" aria-label="关闭" onClick={() => { setEditing(null); setConfirmingDelete(false); }}><X size={17} /></button></div><label>名称<input value={editing.name} onChange={(event) => setEditing({ ...editing, name: event.target.value })} /></label><label>类型<select value={editing.kind} onChange={(event) => setEditing({ ...editing, kind: event.target.value as SummaryProfileView["kind"] })}><option value="template">Markdown 模板</option><option value="systemPrompt">系统提示词</option></select></label><label>内容<textarea className="profile-editor" value={editing.instructions} onChange={(event) => setEditing({ ...editing, instructions: event.target.value })} /></label><label className="check-line"><input type="checkbox" checked={editing.isDefault} onChange={(event) => setEditing({ ...editing, isDefault: event.target.checked })} />设为默认</label>{confirmingDelete && <ErrorBanner message={`再次点击“确认删除”将永久删除方案“${editing.name}”。`} />}<div className="modal-actions">{editing.id && editing.id !== "builtin-task-retrospective" && <button className="danger" onClick={deleteProfile}><Trash2 size={14} />{confirmingDelete ? "确认删除" : "删除"}</button>}<button className="primary" onClick={saveProfile}>保存方案</button></div></div></div>}
+  </div>;
+}

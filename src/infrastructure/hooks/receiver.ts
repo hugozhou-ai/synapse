@@ -13,6 +13,7 @@ export interface HookEventReceiver {
 
 export class UnixSocketHookEventReceiver implements HookEventReceiver {
   private server: Server | null = null;
+  private static readonly maxPayloadBytes = 16 * 1024 * 1024;
   constructor(
     private readonly socketPath: string,
     private readonly awareness: SessionAwarenessService,
@@ -25,7 +26,7 @@ export class UnixSocketHookEventReceiver implements HookEventReceiver {
   async start(): Promise<void> {
     await mkdir(dirname(this.socketPath), { recursive: true, mode: 0o700 });
     await rm(this.socketPath, { force: true });
-    this.server = createServer((socket) => this.accept(socket));
+    this.server = createServer({ allowHalfOpen: true }, (socket) => this.accept(socket));
     await new Promise<void>((resolve, reject) => {
       this.server!.once("error", reject);
       this.server!.listen(this.socketPath, () => resolve());
@@ -41,32 +42,44 @@ export class UnixSocketHookEventReceiver implements HookEventReceiver {
   }
 
   private accept(socket: Socket): void {
-    const chunks: Buffer[] = [];
+    let buffer = Buffer.alloc(0);
     let expectedLength: number | null = null;
+    let payloadOffset = 0;
     let processing = false;
-    const processIfComplete = () => {
+    const finish = (acknowledged: boolean) => socket.end(acknowledged ? "OK\n" : "ERR\n");
+    const failFrame = (message: string) => {
       if (processing) return;
-      const data = Buffer.concat(chunks);
+      processing = true;
+      this.logger.error("[synapse:hook]", "invalid-frame", { message });
+      finish(false);
+    };
+    const processIfComplete = (): void => {
+      if (processing) return;
       if (expectedLength === null) {
-        const separator = data.indexOf(10);
-        if (separator < 0) return;
-        const header = data.subarray(0, separator).toString("ascii");
-        if (!/^\d+$/.test(header)) return;
+        const separator = buffer.indexOf(10);
+        if (separator < 0) {
+          if (buffer.length > 32) failFrame("Hook frame header is too large.");
+          return;
+        }
+        const header = buffer.subarray(0, separator).toString("ascii");
+        if (!/^\d+$/.test(header)) { failFrame("Hook frame length is invalid."); return; }
         expectedLength = Number(header);
-        chunks.length = 0; chunks.push(data.subarray(separator + 1));
+        if (!Number.isSafeInteger(expectedLength) || expectedLength < 1 || expectedLength > UnixSocketHookEventReceiver.maxPayloadBytes) {
+          failFrame("Hook frame length is outside the accepted range."); return;
+        }
+        payloadOffset = separator + 1;
       }
-      const payload = Buffer.concat(chunks);
+      const payload = buffer.subarray(payloadOffset);
       if (payload.length < expectedLength) return;
       processing = true;
-      void this.ingest(payload.subarray(0, expectedLength).toString("utf8")).finally(() => socket.end());
+      void this.ingest(payload.subarray(0, expectedLength).toString("utf8")).then(
+        () => finish(true),
+        () => finish(false),
+      );
     };
-    socket.on("data", (chunk) => { chunks.push(Buffer.from(chunk)); processIfComplete(); });
+    socket.on("data", (chunk) => { buffer = Buffer.concat([buffer, Buffer.from(chunk)]); processIfComplete(); });
     socket.on("end", () => {
-      if (!processing) {
-        processing = true;
-        const raw = Buffer.concat(chunks).toString("utf8");
-        void this.ingest(raw).finally(() => socket.end());
-      }
+      if (!processing) failFrame("Hook connection ended before a complete frame was received.");
     });
     socket.on("error", (error) => this.logger.error("[synapse:hook]", "socket-error", { message: error.message }));
   }

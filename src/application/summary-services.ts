@@ -63,7 +63,7 @@ export class ProfileDrivenSummaryGenerationService implements SummaryGenerationS
     const context = await this.contexts.build(conversation, selection);
     const jobId = this.ids.next(); const now = this.clock.now();
     await this.jobs.save({ id: jobId, documentId: document.id, status: "running", error: null, coveredTurnIds: context.sourceTurnIds, stageCoverage: [], createdAt: now, updatedAt: now });
-    return this.runAgent(document, profile, context, jobId, command.model);
+    return this.runAgent(document, profile, context, jobId, command.model, selection);
   }
 
   async cancel(jobId: string): Promise<void> {
@@ -78,6 +78,7 @@ export class ProfileDrivenSummaryGenerationService implements SummaryGenerationS
     context: Awaited<ReturnType<SummaryContextService["build"]>>,
     jobId: string,
     model: string | null,
+    regeneratedSelection?: ReturnType<TurnSelectionValidator["create"]>,
   ): Promise<SummaryDraft> {
     try {
       const generated = await this.agent.generate({ jobId, context, profile, model });
@@ -87,7 +88,8 @@ export class ProfileDrivenSummaryGenerationService implements SummaryGenerationS
         kind: "agent-draft", content: { title: generated.title, abstract: generated.abstract, bodyMarkdown: generated.bodyMarkdown, tags: generated.tags }, sourceRevision: new SourceRevision(context.sourceTurnIds, context.sourceHash),
         model: generated.model, createdAt: now,
       });
-      document.addDraft(version);
+      if (regeneratedSelection) document.addRegeneratedDraft(version, profile.id, regeneratedSelection);
+      else document.addDraft(version);
       await this.unitOfWork.execute(async () => {
         await this.summaries.save(document);
         const job = await this.jobs.findById(jobId);
@@ -186,6 +188,7 @@ export class OutboxSummaryPublicationService implements SummaryPublicationServic
       const now = this.clock.now();
       await this.publications.save({ documentId, publisher: "apple-notes", externalId: receipt.externalId, target, versionId: version.props.id, status: "published", error: null, updatedAt: now });
       document.markPublished(now); await this.summaries.save(document);
+      await this.outbox?.markAggregateProcessed("notes-sync", documentId, now);
     } catch (error) {
       const now = this.clock.now();
       await this.publications.save({ documentId, publisher: "apple-notes", externalId: existing?.externalId ?? null, target, versionId: version.props.id, status: "failed", error: error instanceof Error ? error.message : String(error), updatedAt: now });
@@ -196,6 +199,5 @@ export class OutboxSummaryPublicationService implements SummaryPublicationServic
 
   async retry(documentId: string): Promise<void> {
     await this.publishCurrent(documentId);
-    await this.outbox?.markAggregateProcessed("notes-sync", documentId, this.clock.now());
   }
 }

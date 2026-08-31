@@ -3,14 +3,15 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { BetterSqliteSynapseDatabase } from "@infrastructure/sqlite/database";
-import { SqliteCodexSessionRepository, SqliteCodexTurnRepository, SqliteHookEventRepository, SqliteOutboxRepository, SqliteSummaryDocumentRepository } from "@infrastructure/sqlite/repositories";
+import { SqliteCodexSessionRepository, SqliteCodexTurnRepository, SqliteHookEventRepository, SqliteOutboxRepository, SqliteSummaryDocumentRepository, SqliteSummaryJobRepository, SqliteSummaryProfileRepository } from "@infrastructure/sqlite/repositories";
 import { BetterSqliteUnitOfWork } from "@infrastructure/sqlite/unit-of-work";
-import { DefaultSessionLifecycleService } from "@domain/services";
+import { ArbitraryTurnSelectionService, DefaultSessionLifecycleService, NormalizedTurnSummaryContextService } from "@domain/services";
 import { HookBasedSessionAwarenessService } from "@application/session-services";
-import { VersionedSummaryFinalizationService } from "@application/summary-services";
+import { ProfileDrivenSummaryGenerationService, VersionedSummaryFinalizationService } from "@application/summary-services";
 import { CodexSessionAggregate } from "@domain/session";
-import { PublicationTarget, SourceRevision, SummaryDocumentAggregate, SummaryVersion, TurnSelection } from "@domain/summary";
+import { PublicationTarget, SourceRevision, SummaryDocumentAggregate, SummaryProfile, SummaryVersion, TurnSelection } from "@domain/summary";
 import { NotesOutboxWorker } from "@infrastructure/notes/outbox-worker";
+import { NodeContentHashService } from "@infrastructure/system";
 import type { Logger } from "@shared/logger";
 
 const logger: Logger = { info() {}, error() {} };
@@ -64,7 +65,40 @@ describe("application services", () => {
       expect(row).toEqual({ attempts: 1, last_error: "permission denied" });
     } finally { database.close(); }
   });
+
+  it("persists a regenerated draft with its new profile and turn selection", async () => {
+    const { database } = await testDatabase();
+    try {
+      const sessions = new SqliteCodexSessionRepository(database); const turns = new SqliteCodexTurnRepository(database);
+      const profiles = new SqliteSummaryProfileRepository(database); const summaries = new SqliteSummaryDocumentRepository(database); const jobs = new SqliteSummaryJobRepository(database);
+      const session = CodexSessionAggregate.create("session", "thread", "/repo", "a");
+      session.startTurn({ turnId: "turn-1", promptPreview: "one", at: "b" }); session.completeTurn({ turnId: "turn-1", assistantPreview: "done-one", at: "c" });
+      session.startTurn({ turnId: "turn-2", promptPreview: "two", at: "d" }); session.completeTurn({ turnId: "turn-2", assistantPreview: "done-two", at: "e" });
+      await sessions.save(session); await turns.saveMany(session.id, session.turns);
+      await profiles.save(new SummaryProfile("new-profile", "New profile", "systemPrompt", "Summarize", false));
+      await summaries.save(SummaryDocumentAggregate.create({ id: "doc", sessionId: "session", profileId: "builtin-task-retrospective", selection: new TurnSelection(["turn-1"]), publicationTarget: null, createdAt: "f", updatedAt: "f" }));
+      let id = 0;
+      const service = new ProfileDrivenSummaryGenerationService(
+        { async readConversation() { return conversation(); }, async waitUntilTurnPersisted() { return conversation(); } },
+        new ArbitraryTurnSelectionService(), new NormalizedTurnSummaryContextService(new NodeContentHashService()),
+        { async generate() { return { title: "New", abstract: "", bodyMarkdown: "Body", tags: [], model: null, stages: [{ kind: "final", turnIds: ["turn-2"] }] }; }, async cancel() {}, async listModels() { return []; } },
+        profiles, summaries, sessions, jobs, new BetterSqliteUnitOfWork(database), { now: () => "g" }, { next: () => `generated-${++id}` },
+      );
+      await service.regenerate({ documentId: "doc", selectedTurnIds: ["turn-2"], profileId: "new-profile", stopTurnId: "turn-2", model: null });
+      const saved = await summaries.findById("doc");
+      expect(saved?.snapshot.profileId).toBe("new-profile");
+      expect(saved?.snapshot.selection.turnIds).toEqual(["turn-2"]);
+      expect(saved?.currentVersion?.props.sourceRevision.turnIds).toEqual(["turn-2"]);
+    } finally { database.close(); }
+  });
 });
+
+function conversation() {
+  return { threadId: "thread", turns: [
+    { id: "turn-1", sequence: 0, status: "completed" as const, startedAt: "b", completedAt: "c", items: [{ type: "user" as const, text: "one" }, { type: "agent" as const, text: "done-one" }] },
+    { id: "turn-2", sequence: 1, status: "completed" as const, startedAt: "d", completedAt: "e", items: [{ type: "user" as const, text: "two" }, { type: "agent" as const, text: "done-two" }] },
+  ] };
+}
 
 async function testDatabase() {
   const root = await mkdtemp(join(tmpdir(), "synapse-application-")); directories.push(root);

@@ -1,18 +1,17 @@
 import type { AgentModel, ApplicationSettings, AppServerRuntimeStatus, HookInstallationStatus, SummarySearchCriteria, SummarySearchResult } from "@application/ports";
-import type { FinalizeSummaryCommand, GenerateSummaryCommand, RegenerateSummaryCommand, SaveProfileCommand, SummaryDetailView, SummaryDraft, SummaryProfileView, TurnSelectionView, UpdateDraftCommand, WidgetSessionView } from "@application/contracts";
-import type { SummaryVersion } from "@domain/summary";
+import type { ConversationTurnsView, FinalizeSummaryCommand, FinalizedSummaryView, GenerateSummaryCommand, NotesTargetsView, RegenerateSummaryCommand, SaveProfileCommand, SummaryDetailView, SummaryDraft, SummaryProfileView, UpdateDraftCommand, WidgetSessionView } from "@application/contracts";
 
 export interface SynapseApi {
   sessions: {
     listWidgetQueue(): Promise<readonly WidgetSessionView[]>;
-    turns(sessionId: string): Promise<readonly TurnSelectionView[]>;
+    turns(sessionId: string): Promise<ConversationTurnsView>;
     ignore(sessionId: string): Promise<void>;
   };
   summaries: {
     generate(command: GenerateSummaryCommand): Promise<SummaryDraft>;
     regenerate(command: RegenerateSummaryCommand): Promise<SummaryDraft>;
     updateDraft(command: UpdateDraftCommand): Promise<SummaryDraft>;
-    finalize(command: FinalizeSummaryCommand): Promise<SummaryVersion["props"]>;
+    finalize(command: FinalizeSummaryCommand): Promise<FinalizedSummaryView>;
     search(query: SummarySearchCriteria): Promise<SummarySearchResult>;
     get(documentId: string): Promise<SummaryDetailView>;
     retryNotes(documentId: string): Promise<void>;
@@ -26,6 +25,7 @@ export interface SynapseApi {
     read(): Promise<ApplicationSettings>;
     update(command: Partial<ApplicationSettings>): Promise<ApplicationSettings>;
     models(): Promise<readonly AgentModel[]>;
+    notesTargets(): Promise<NotesTargetsView>;
     runtime(): Promise<AppServerRuntimeStatus>;
   };
   hooks: {

@@ -1,5 +1,5 @@
 import type { CodexConversation, GeneratedSummary, SummaryContext } from "@domain/conversation";
-import type { CodexLifecycleEvent, CodexSessionAggregate, CodexTurn } from "@domain/session";
+import type { CodexTurn } from "@domain/session";
 import type { DomainEvent } from "@domain/shared";
 import type {
   PublicationTarget,
@@ -8,36 +8,11 @@ import type {
   SummaryVersion,
   TurnSelection,
 } from "@domain/summary";
+import type { SummaryDocumentRepository as DomainSummaryDocumentRepository } from "@domain/repositories";
+import type { NotesTargetsView } from "./contracts";
+export type { CodexSessionRepository, CodexTurnRepository, HookEventRepository, SummaryProfileRepository } from "@domain/repositories";
 
-export interface CodexSessionRepository {
-  findById(id: string): Promise<CodexSessionAggregate | null>;
-  findByThreadId(threadId: string): Promise<CodexSessionAggregate | null>;
-  save(session: CodexSessionAggregate): Promise<void>;
-  listWidgetQueue(limit?: number): Promise<readonly CodexSessionAggregate[]>;
-  search(input: { status?: string; cwd?: string; limit: number; offset: number }): Promise<readonly CodexSessionAggregate[]>;
-}
-
-export interface CodexTurnRepository {
-  saveMany(sessionId: string, turns: readonly CodexTurn[]): Promise<void>;
-  listBySessionId(sessionId: string): Promise<readonly CodexTurn[]>;
-}
-
-export interface HookEventRepository {
-  exists(deduplicationKey: string): Promise<boolean>;
-  add(input: { deduplicationKey: string; event: CodexLifecycleEvent; receivedAt: string }): Promise<void>;
-}
-
-export interface SummaryProfileRepository {
-  findById(id: string): Promise<SummaryProfile | null>;
-  list(): Promise<readonly SummaryProfile[]>;
-  save(profile: SummaryProfile): Promise<void>;
-  delete(id: string): Promise<void>;
-}
-
-export interface SummaryDocumentRepository {
-  findById(id: string): Promise<SummaryDocumentAggregate | null>;
-  findLatestBySessionId(sessionId: string): Promise<SummaryDocumentAggregate | null>;
-  save(document: SummaryDocumentAggregate): Promise<void>;
+export interface SummaryDocumentRepository extends DomainSummaryDocumentRepository {
   search(input: SummarySearchCriteria): Promise<SummarySearchResult>;
 }
 
@@ -137,6 +112,10 @@ export interface SummaryPublisher {
   publish(request: PublishSummaryRequest): Promise<PublicationReceipt>;
 }
 
+export interface NotesTargetGateway {
+  listTargets(): Promise<NotesTargetsView>;
+}
+
 export interface EventPublisher {
   publish(events: readonly DomainEvent[]): Promise<void>;
 }
@@ -214,14 +193,20 @@ export interface ApplicationSettings {
   readonly notesFolder: string;
   readonly widgetVisible: boolean;
   readonly widgetPositions: Readonly<Record<string, { x: number; y: number }>>;
+  readonly widgetDisplayId: string | null;
 }
 
 export interface AppServerRuntimeStatus {
+  readonly state: "initializing" | "available" | "unavailable";
   readonly available: boolean;
   readonly binaryPath: string | null;
   readonly version: string | null;
   readonly authentication: "signed-in" | "required" | "not-required" | "unknown";
   readonly error: string | null;
+}
+
+export interface AppServerRuntimeStatusProvider {
+  current(): Promise<AppServerRuntimeStatus>;
 }
 
 export interface SettingsRepository {

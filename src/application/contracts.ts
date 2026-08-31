@@ -1,4 +1,12 @@
-import type { PublicationTarget, SummaryContent, SummaryProfileKind } from "@domain/summary";
+export interface SummaryContentView {
+  readonly title: string;
+  readonly abstract: string;
+  readonly bodyMarkdown: string;
+  readonly tags: readonly string[];
+}
+
+export type SummaryProfileKindView = "template" | "systemPrompt";
+export interface PublicationTargetInput { readonly account: string | null; readonly folder: string; }
 
 export interface SessionTransitionResult {
   readonly sessionId: string;
@@ -15,7 +23,7 @@ export interface GenerateSummaryCommand {
   readonly stopTurnId: string;
   readonly model: string | null;
   readonly syncToNotes: boolean;
-  readonly publicationTarget: PublicationTarget | null;
+  readonly publicationTarget: PublicationTargetInput | null;
 }
 
 export interface RegenerateSummaryCommand {
@@ -29,11 +37,29 @@ export interface RegenerateSummaryCommand {
 export interface SummaryDraft {
   readonly documentId: string;
   readonly versionId: string;
-  readonly content: SummaryContent;
+  readonly content: SummaryContentView;
 }
 
-export interface UpdateDraftCommand { readonly documentId: string; readonly content: SummaryContent; }
-export interface FinalizeSummaryCommand { readonly documentId: string; readonly content: SummaryContent; readonly syncToNotes: boolean; }
+export interface UpdateDraftCommand { readonly documentId: string; readonly content: SummaryContentView; }
+export interface FinalizeSummaryCommand { readonly documentId: string; readonly content: SummaryContentView; readonly syncToNotes: boolean; }
+
+export interface FinalizedSummaryView {
+  readonly id: string;
+  readonly documentId: string;
+  readonly sequence: number;
+  readonly kind: string;
+  readonly content: SummaryContentView;
+  readonly sourceRevision: { readonly turnIds: readonly string[]; readonly contentHash: string };
+  readonly model: string | null;
+  readonly createdAt: string;
+}
+
+export interface NotesTargetsView {
+  readonly accounts: readonly {
+    readonly name: string;
+    readonly folders: readonly string[];
+  }[];
+}
 
 export interface WidgetSessionView {
   readonly id: string;
@@ -57,6 +83,13 @@ export interface TurnSelectionView {
   readonly selectedByDefault: boolean;
 }
 
+export interface ConversationTurnsView {
+  readonly turns: readonly TurnSelectionView[];
+  readonly source: "app-server" | "hook-cache";
+  readonly syncStatus: "synced" | "pending" | "unavailable";
+  readonly message: string | null;
+}
+
 export interface SummaryDetailView {
   readonly id: string;
   readonly sessionId: string;
@@ -66,7 +99,7 @@ export interface SummaryDetailView {
   readonly currentVersion: null | {
     readonly id: string;
     readonly kind: string;
-    readonly content: SummaryContent;
+    readonly content: SummaryContentView;
     readonly createdAt: string;
   };
   readonly versions: readonly { id: string; kind: string; createdAt: string }[];
@@ -75,7 +108,7 @@ export interface SummaryDetailView {
 export interface SummaryProfileView {
   readonly id: string;
   readonly name: string;
-  readonly kind: SummaryProfileKind;
+  readonly kind: SummaryProfileKindView;
   readonly instructions: string;
   readonly isDefault: boolean;
 }
@@ -83,7 +116,7 @@ export interface SummaryProfileView {
 export interface SaveProfileCommand {
   readonly id?: string;
   readonly name: string;
-  readonly kind: SummaryProfileKind;
+  readonly kind: SummaryProfileKindView;
   readonly instructions: string;
   readonly isDefault: boolean;
 }

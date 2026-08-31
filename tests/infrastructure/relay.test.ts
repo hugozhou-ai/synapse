@@ -3,6 +3,7 @@ import { mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
+import { createConnection } from "node:net";
 import type { CodexLifecycleEvent } from "@domain/session";
 import type { SessionAwarenessService } from "@application/session-services";
 import { UnixSocketHookEventReceiver } from "@infrastructure/hooks/receiver";
@@ -41,6 +42,78 @@ describe("codex-hook-relay", () => {
       expect((await runRelay(support, payload)).trim()).toBe("{}");
       await waitUntil(() => captured.length === 1);
       expect(captured[0]?.sessionId).toBe("线程-一");
+      expect(await readdir(join(support, "spool"))).toHaveLength(0);
+    } finally { await receiver.stop(); }
+  });
+
+  it("spools the payload when the receiver cannot commit it", async () => {
+    const support = await mkdtemp(join(tmpdir(), "synapse-relay-rejected-")); directories.push(support);
+    const awareness: SessionAwarenessService = {
+      async ingest() { throw new Error("database unavailable"); },
+      async replay() { return { accepted: 0, duplicates: 0, failed: 0 }; }, async ignore() {},
+    };
+    const receiver = new UnixSocketHookEventReceiver(join(support, "run", "hook.sock"), awareness, new CodexHookProtocolMapper(), new FileSystemHookEventSpool(join(support, "spool")), logger, () => undefined);
+    await receiver.start();
+    try {
+      const payload = JSON.stringify({ hook_event_name: "Stop", session_id: "session", turn_id: "turn", cwd: "/tmp/project", last_assistant_message: "done" });
+      expect((await runRelay(support, payload)).trim()).toBe("{}");
+      const files = await readdir(join(support, "spool"));
+      expect(files).toHaveLength(1);
+      expect(await readFile(join(support, "spool", files[0]!), "utf8")).toBe(payload);
+    } finally { await receiver.stop(); }
+  });
+
+  it("acknowledges concurrent large Unicode frames without truncation", async () => {
+    const support = await mkdtemp(join(tmpdir(), "synapse-relay-concurrent-")); directories.push(support);
+    const captured = new Set<string>();
+    const awareness: SessionAwarenessService = {
+      async ingest(event) { captured.add(event.sessionId); return { sessionId: event.sessionId, status: "ready", duplicate: false }; },
+      async replay() { return { accepted: 0, duplicates: 0, failed: 0 }; }, async ignore() {},
+    };
+    const receiver = new UnixSocketHookEventReceiver(join(support, "run", "hook.sock"), awareness, new CodexHookProtocolMapper(), new FileSystemHookEventSpool(join(support, "spool")), logger, () => undefined);
+    await receiver.start();
+    try {
+      await Promise.all(Array.from({ length: 6 }, (_, index) => runRelay(support, JSON.stringify({ hook_event_name: "Stop", session_id: `会话-${index}`, turn_id: `turn-${index}`, cwd: "/tmp/项目", last_assistant_message: "完成".repeat(100_000) }))));
+      expect(captured.size).toBe(6);
+      expect(await readdir(join(support, "spool"))).toHaveLength(0);
+    } finally { await receiver.stop(); }
+  });
+
+  it("rejects a connection that ends with a partial frame", async () => {
+    const support = await mkdtemp(join(tmpdir(), "synapse-relay-partial-")); directories.push(support);
+    let ingested = 0;
+    const awareness: SessionAwarenessService = {
+      async ingest(event) { ingested += 1; return { sessionId: event.sessionId, status: "ready", duplicate: false }; },
+      async replay() { return { accepted: 0, duplicates: 0, failed: 0 }; }, async ignore() {},
+    };
+    const socketPath = join(support, "run", "hook.sock");
+    const receiver = new UnixSocketHookEventReceiver(socketPath, awareness, new CodexHookProtocolMapper(), new FileSystemHookEventSpool(join(support, "spool")), logger, () => undefined);
+    await receiver.start();
+    try {
+      const response = await new Promise<string>((resolveConnection, reject) => {
+        const chunks: Buffer[] = [];
+        const socket = createConnection(socketPath, () => { socket.end("100\n{\"incomplete\":true}"); });
+        socket.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+        socket.on("error", reject); socket.on("close", () => resolveConnection(Buffer.concat(chunks).toString("utf8")));
+      });
+      expect(response.trim()).toBe("ERR");
+      expect(ingested).toBe(0);
+    } finally { await receiver.stop(); }
+  });
+
+  it("replays an offline spool exactly once when the receiver starts", async () => {
+    const support = await mkdtemp(join(tmpdir(), "synapse-relay-replay-")); directories.push(support);
+    const payload = JSON.stringify({ hook_event_name: "Stop", session_id: "replayed", turn_id: "turn", cwd: "/tmp/project", last_assistant_message: "done" });
+    await runRelay(support, payload);
+    const captured: CodexLifecycleEvent[] = [];
+    const awareness: SessionAwarenessService = {
+      async ingest(event) { captured.push(event); return { sessionId: event.sessionId, status: "ready", duplicate: false }; },
+      async replay() { return { accepted: 0, duplicates: 0, failed: 0 }; }, async ignore() {},
+    };
+    const receiver = new UnixSocketHookEventReceiver(join(support, "run", "hook.sock"), awareness, new CodexHookProtocolMapper(), new FileSystemHookEventSpool(join(support, "spool")), logger, () => undefined);
+    await receiver.start();
+    try {
+      expect(captured.map((event) => event.sessionId)).toEqual(["replayed"]);
       expect(await readdir(join(support, "spool"))).toHaveLength(0);
     } finally { await receiver.stop(); }
   });

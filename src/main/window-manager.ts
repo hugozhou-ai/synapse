@@ -1,6 +1,7 @@
 import { BrowserWindow, Menu, Tray, app, nativeImage, screen } from "electron";
 import { join } from "node:path";
 import type { SettingsApplicationService } from "@application/query-services";
+import { resolveWidgetPlacement } from "./widget-placement";
 
 export class ElectronWindowManager {
   private widget: BrowserWindow | null = null;
@@ -14,7 +15,7 @@ export class ElectronWindowManager {
     this.widget = this.createWindow({ width: 380, height: 88, transparent: true, frame: false, resizable: false, skipTaskbar: true, alwaysOnTop: true });
     this.widget.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     this.widget.setAlwaysOnTop(true, "floating");
-    this.placeWidget(settings.widgetPositions);
+    this.placeWidget(settings.widgetPositions, settings.widgetDisplayId);
     await this.load(this.widget, "widget");
     if (settings.widgetVisible) this.widget.showInactive();
     this.createTray();
@@ -58,12 +59,12 @@ export class ElectronWindowManager {
     else await window.loadFile(join(__dirname, "../renderer/index.html"), { hash: `/${route}` });
   }
 
-  private placeWidget(positions: Readonly<Record<string, { x: number; y: number }>>): void {
+  private placeWidget(positions: Readonly<Record<string, { x: number; y: number }>>, displayId: string | null): void {
     if (!this.widget) return;
-    const display = screen.getPrimaryDisplay(); const saved = positions[String(display.id)];
+    const primary = screen.getPrimaryDisplay();
+    const placement = resolveWidgetPlacement(screen.getAllDisplays(), primary.id, displayId, positions, this.widget.getBounds());
     let currentPositions = { ...positions };
-    const bounds = display.workArea;
-    this.widget.setPosition(saved?.x ?? bounds.x + bounds.width - 396, saved?.y ?? bounds.y + 16);
+    this.widget.setPosition(placement.x, placement.y);
     let timer: NodeJS.Timeout | null = null;
     this.widget.on("move", () => {
       if (timer) clearTimeout(timer);
@@ -71,7 +72,7 @@ export class ElectronWindowManager {
         const [x = 0, y = 0] = this.widget!.getPosition();
         const currentDisplay = screen.getDisplayMatching(this.widget!.getBounds());
         currentPositions = { ...currentPositions, [String(currentDisplay.id)]: { x, y } };
-        void this.settings.update({ widgetPositions: currentPositions });
+        void this.settings.update({ widgetPositions: currentPositions, widgetDisplayId: String(currentDisplay.id) });
       }, 300);
     });
   }
@@ -86,6 +87,10 @@ export class ElectronWindowManager {
       { type: "separator" },
       { label: "退出 Synapse", click: () => app.quit() },
     ]));
-    this.tray.on("click", () => { if (this.widget?.isVisible()) this.widget.hide(); else this.widget?.showInactive(); });
+    this.tray.on("click", () => {
+      const visible = !(this.widget?.isVisible() ?? false);
+      if (visible) this.widget?.showInactive(); else this.widget?.hide();
+      void this.settings.update({ widgetVisible: visible });
+    });
   }
 }

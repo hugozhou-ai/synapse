@@ -102,7 +102,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .selection-actions { display: flex; gap: 5px; }
 .selection-actions button, .editor-tabs button, .detail-actions button { border: 0; border-radius: 7px; padding: 6px 9px; color: var(--muted); background: #efede7; font-size: 9px; cursor: pointer; }
 .turn-list { max-height: 550px; overflow: auto; padding: 6px 0; }
-.turn-row { position: relative; min-height: 97px; padding: 13px 16px; display: grid; grid-template-columns: 22px 30px 1fr; gap: 9px; border-bottom: 1px solid #e9e6de; cursor: default; user-select: none; }
+.turn-row { position: relative; width: 100%; min-height: 97px; padding: 13px 16px; display: grid; grid-template-columns: 22px 30px 1fr; gap: 9px; border: 0; border-bottom: 1px solid #e9e6de; color: inherit; text-align: left; background: transparent; cursor: pointer; user-select: none; }
 .turn-row:last-child { border-bottom: 0; }
 .turn-row.selected { background: #fcf4ed; }
 .turn-row.selected::before { position: absolute; inset: 0 auto 0 0; width: 3px; content: ""; background: var(--orange); }
@@ -110,9 +110,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .checkbox.checked { border-color: var(--orange); color: white; background: var(--orange); }
 .turn-index { padding-top: 2px; color: #aaa99f; font-family: ui-monospace, monospace; font-size: 9px; }
 .turn-copy { min-width: 0; }
-.turn-copy strong, .turn-copy p { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.turn-copy strong, .turn-assistant { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .turn-copy strong { margin-bottom: 7px; font-size: 11px; }
-.turn-copy p { margin: 0 0 8px; color: var(--muted); font-size: 10px; }
+.turn-assistant { margin: 0 0 8px; color: var(--muted); font-size: 10px; }
 .turn-copy span { color: #a2a198; font-size: 8px; }
 .gesture-tip { padding: 12px 18px; border-top: 1px solid var(--line); color: #a09f97; font-size: 8px; }
 .generation-panel { position: sticky; top: 30px; padding: 21px; display: grid; gap: 17px; }
@@ -135,7 +135,9 @@ select { height: 39px; }
 .notes-target { display: grid; gap: 9px; padding: 12px; border-radius: 10px; background: #efede7; }
 .source-count strong { color: var(--orange); font-family: ui-serif, Georgia, serif; font-size: 24px; }
 .source-count span { color: var(--muted); font-size: 9px; }
-.error-banner { min-height: 40px; margin: 0 0 16px; padding: 10px 13px; display: flex; align-items: center; gap: 9px; border: 1px solid #edc6bd; border-radius: 10px; color: #9b4537; background: #faeae6; font-size: 10px; }
+.error-banner, .info-banner { min-height: 40px; margin: 0 0 16px; padding: 10px 13px; display: flex; align-items: center; gap: 9px; border: 1px solid #edc6bd; border-radius: 10px; color: #9b4537; background: #faeae6; font-size: 10px; }
+.info-banner { flex: 1; margin: 0; border-color: #d7d3c4; color: #65665f; background: #f1eee5; }
+.sync-message { margin-bottom: 16px; display: flex; align-items: stretch; gap: 8px; }
 .draft-workspace { border: 1px solid var(--line); border-radius: 17px; overflow: hidden; background: rgba(250,249,245,.9); }
 .draft-toolbar { min-height: 67px; padding: 13px 18px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); }
 .draft-toolbar > div { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 9px; }
@@ -160,6 +162,8 @@ select { height: 39px; }
 .search-box input { border: 0; outline: 0; background: transparent; }
 .filter-bar { margin: -9px 0 14px; display: grid; grid-template-columns: 1.3fr 1fr .8fr .8fr .8fr; gap: 7px; }
 .filter-bar select, .filter-bar input { height: 34px; padding: 6px 8px; color: var(--muted); font-size: 9px; }
+.compact-filter { gap: 3px; color: #8c8d84; font-size: 7px; }
+.compact-filter input { height: 25px; }
 .history-layout { min-height: 570px; display: grid; grid-template-columns: 320px minmax(0, 1fr); border: 1px solid var(--line); border-radius: 17px; overflow: hidden; background: rgba(250,249,245,.85); }
 .history-list { padding: 8px; border-right: 1px solid var(--line); overflow: auto; }
 .history-card { width: 100%; padding: 15px; border: 0; border-bottom: 1px solid #e9e6de; text-align: left; background: transparent; cursor: pointer; }

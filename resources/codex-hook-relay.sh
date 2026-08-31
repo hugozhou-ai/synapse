@@ -14,9 +14,11 @@ if [ -n "${synapse_temp_file}" ]; then
   /bin/cat > "${synapse_temp_file}" 2>/dev/null || true
 
   synapse_payload_size="$(/usr/bin/wc -c < "${synapse_temp_file}" | /usr/bin/tr -d ' ')"
-  if [ -S "${synapse_socket_path}" ] && { /usr/bin/printf '%s\n' "${synapse_payload_size}"; /bin/cat "${synapse_temp_file}"; } | /usr/bin/nc -U -w 1 "${synapse_socket_path}" >/dev/null 2>&1; then
-    :
-  else
+  synapse_ack=""
+  if [ -S "${synapse_socket_path}" ]; then
+    synapse_ack="$({ /usr/bin/printf '%s\n' "${synapse_payload_size}"; /bin/cat "${synapse_temp_file}"; } | /usr/bin/nc -U -w 2 "${synapse_socket_path}" 2>/dev/null)" || synapse_ack=""
+  fi
+  if [ "${synapse_ack}" != "OK" ]; then
     synapse_spool_name="$(/bin/date -u +%Y%m%dT%H%M%S)-$$-${RANDOM:-0}.json"
     synapse_spool_temp="${synapse_spool_dir}/.${synapse_spool_name}.tmp"
     if /bin/cp "${synapse_temp_file}" "${synapse_spool_temp}" 2>/dev/null; then

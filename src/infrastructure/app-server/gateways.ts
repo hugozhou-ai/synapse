@@ -80,13 +80,22 @@ export class CodexAppServerSummaryAgentGateway implements SummaryAgentGateway {
       developerInstructions: instructions,
     });
     const threadId = started.thread.id;
-    const turnStarted = await this.client.request<{ turn: { id: string } }>("turn/start", {
-      threadId, input: [{ type: "text", text: `整理以下 Codex 会话内容：\n\n${source}`, text_elements: [] }], outputSchema,
-    });
+    const completion = createTurnCompletionWaiter(this.client, threadId);
+    let turnStarted: { turn: { id: string } };
+    try {
+      turnStarted = await this.client.request<{ turn: { id: string } }>("turn/start", {
+        threadId, input: [{ type: "text", text: `整理以下 Codex 会话内容：\n\n${source}`, text_elements: [] }], outputSchema,
+      });
+    } catch (error) {
+      completion.cancel();
+      await completion.promise.catch(() => undefined);
+      throw error;
+    }
     const turnId = turnStarted.turn.id;
     this.jobs.set(jobId, { threadId, turnId });
     try {
-      const turn = await waitForCompletedTurn(this.client, threadId, turnId);
+      const turn = await completion.promise;
+      if (turn.id !== turnId) throw new Error(`Summary completion belonged to unexpected turn ${String(turn.id)}.`);
       if (String(turn.status) !== "completed") throw new Error(`Summary turn ended with status ${String(turn.status)}.`);
       const items = Array.isArray(turn.items) ? turn.items as Array<Record<string, unknown>> : [];
       const message = [...items].reverse().find((item) => item.type === "agentMessage");
@@ -100,16 +109,24 @@ export class CodexAppServerSummaryAgentGateway implements SummaryAgentGateway {
   }
 }
 
-async function waitForCompletedTurn(client: CodexAppServerClient, threadId: string, turnId: string): Promise<Record<string, unknown>> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { unsubscribe(); reject(new Error("Summary agent timed out.")); }, 20 * 60 * 1_000);
+function createTurnCompletionWaiter(client: CodexAppServerClient, threadId: string): { promise: Promise<Record<string, unknown>>; cancel(): void } {
+  let cancel: () => void = () => undefined;
+  const promise = new Promise<Record<string, unknown>>((resolve, reject) => {
+    let settled = false;
+    const settle = (action: () => void) => {
+      if (settled) return;
+      settled = true; clearTimeout(timer); unsubscribe(); action();
+    };
     const unsubscribe = client.subscribe((notification: CodexNotification) => {
       if (notification.method !== "turn/completed") return;
       const params = notification.params as { threadId?: unknown; turn?: Record<string, unknown> };
-      if (params.threadId !== threadId || params.turn?.id !== turnId) return;
-      clearTimeout(timer); unsubscribe(); resolve(params.turn);
+      if (params.threadId !== threadId || !params.turn) return;
+      settle(() => resolve(params.turn!));
     });
+    const timer = setTimeout(() => settle(() => reject(new Error("Summary agent timed out."))), 20 * 60 * 1_000);
+    cancel = () => settle(() => reject(new Error("Summary turn wait canceled.")));
   });
+  return { promise, cancel };
 }
 
 export class AppServerHookTrustGateway implements HookTrustGateway {

@@ -38,4 +38,17 @@ describe("JsonCodexHookConfigStore", () => {
     await expect(store.mergeOwnedHooks({ command: "/relay", statusMessage: "Managed by Synapse" })).rejects.toThrow();
     expect(await readFile(join(codex, "hooks.json"), "utf8")).toBe("not-json");
   });
+
+  it("repairs a hooks feature flag that was disabled after installation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "synapse-hook-repair-")); directories.push(root);
+    const codex = join(root, "codex"); await mkdir(codex); await writeFile(join(codex, "config.toml"), "[features]\nhooks = false\n");
+    const store = new JsonCodexHookConfigStore(codex, join(root, "support"), logger);
+    await store.mergeOwnedHooks({ command: "/relay", statusMessage: "Managed by Synapse" });
+    await writeFile(join(codex, "config.toml"), "[features]\nhooks = false\n");
+    await store.mergeOwnedHooks({ command: "/relay", statusMessage: "Managed by Synapse" });
+    expect(await readFile(join(codex, "config.toml"), "utf8")).toContain("hooks = true");
+    await writeFile(join(codex, "config.toml"), "[features]\nhooks = false\n");
+    await store.removeOwnedHooks((await store.read()).manifest!);
+    expect(await readFile(join(codex, "config.toml"), "utf8")).toContain("hooks = false");
+  });
 });

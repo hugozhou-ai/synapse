@@ -3,7 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { BetterSqliteSynapseDatabase } from "@infrastructure/sqlite/database";
-import { SqliteCodexSessionRepository, SqliteCodexTurnRepository, SqliteSummaryDocumentRepository, SqliteSummaryProfileRepository } from "@infrastructure/sqlite/repositories";
+import { SqliteCodexSessionRepository, SqliteCodexTurnRepository, SqliteSettingsRepository, SqliteSummaryDocumentRepository, SqliteSummaryProfileRepository } from "@infrastructure/sqlite/repositories";
+import { BetterSqliteUnitOfWork } from "@infrastructure/sqlite/unit-of-work";
 import { CodexSessionAggregate } from "@domain/session";
 import { SourceRevision, SummaryDocumentAggregate, SummaryVersion, TurnSelection } from "@domain/summary";
 import type { Logger } from "@shared/logger";
@@ -35,6 +36,31 @@ describe("SQLite repository contract", () => {
       expect((await summaries.findById("doc"))?.snapshot.versions).toHaveLength(2);
       const result = await summaries.search({ text: "searchable", limit: 20, offset: 0 });
       expect(result.total).toBe(1); expect(result.items[0]?.documentId).toBe("doc");
+    } finally { database.close(); }
+  });
+
+  it("holds the connection-wide queue until an asynchronous transaction rolls back", async () => {
+    const root = await mkdtemp(join(tmpdir(), "synapse-sqlite-uow-")); directories.push(root);
+    const database = new BetterSqliteSynapseDatabase(join(root, "synapse.sqlite3"), logger);
+    try {
+      const sessions = new SqliteCodexSessionRepository(database); const settings = new SqliteSettingsRepository(database);
+      const unitOfWork = new BetterSqliteUnitOfWork(database);
+      let entered!: () => void; const enteredTransaction = new Promise<void>((resolve) => { entered = resolve; });
+      let unblock!: () => void; const blocker = new Promise<void>((resolve) => { unblock = resolve; });
+      const transaction = unitOfWork.execute(async () => {
+        await sessions.save(CodexSessionAggregate.create("rolled-back", "thread", "/repo", "now"));
+        entered(); await blocker; throw new Error("rollback");
+      });
+      await enteredTransaction;
+      let outsideCompleted = false;
+      const outside = settings.save({ codexBinaryPath: null, summaryModel: "model", syncNotesByDefault: false, notesAccount: null, notesFolder: "Synapse", widgetVisible: true, widgetPositions: {}, widgetDisplayId: null }).then(() => { outsideCompleted = true; });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(outsideCompleted).toBe(false);
+      unblock();
+      await expect(transaction).rejects.toThrow("rollback");
+      await outside;
+      expect(await sessions.findById("rolled-back")).toBeNull();
+      expect((await settings.read()).summaryModel).toBe("model");
     } finally { database.close(); }
   });
 });

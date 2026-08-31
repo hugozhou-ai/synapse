@@ -1,11 +1,11 @@
 import { SummaryProfile } from "@domain/summary";
-import type { AgentModel, ApplicationSettings, AppServerRuntimeStatus, Clock, CodexSessionRepository, CodexTurnRepository, ConversationGateway, ExportGateway, IdGenerator, SettingsRepository, SummaryAgentGateway, SummaryDocumentRepository, SummaryProfileRepository, SummarySearchCriteria, SummarySearchResult } from "./ports";
-import type { SaveProfileCommand, SummaryDetailView, SummaryProfileView, TurnSelectionView, WidgetSessionView } from "./contracts";
+import type { AgentModel, ApplicationSettings, AppServerRuntimeStatus, AppServerRuntimeStatusProvider, Clock, CodexSessionRepository, CodexTurnRepository, ConversationGateway, ExportGateway, IdGenerator, NotesTargetGateway, SettingsRepository, SummaryAgentGateway, SummaryDocumentRepository, SummaryProfileRepository, SummarySearchCriteria, SummarySearchResult, UnitOfWork } from "./ports";
+import type { ConversationTurnsView, NotesTargetsView, SaveProfileCommand, SummaryDetailView, SummaryProfileView, WidgetSessionView } from "./contracts";
 import { DomainError } from "@domain/shared";
 
 export interface SessionQueryService {
   listWidgetQueue(): Promise<readonly WidgetSessionView[]>;
-  getConversationTurns(sessionId: string): Promise<readonly TurnSelectionView[]>;
+  getConversationTurns(sessionId: string): Promise<ConversationTurnsView>;
 }
 
 export class RepositorySessionQueryService implements SessionQueryService {
@@ -33,14 +33,15 @@ export class RepositorySessionQueryService implements SessionQueryService {
     });
   }
 
-  async getConversationTurns(sessionId: string): Promise<readonly TurnSelectionView[]> {
+  async getConversationTurns(sessionId: string): Promise<ConversationTurnsView> {
     const session = await this.sessions.findById(sessionId);
+    let synchronization: Pick<ConversationTurnsView, "syncStatus" | "message"> = { syncStatus: "pending", message: "Codex 会话仍在同步，当前展示 Hook 缓存。" };
     if (session && this.conversations) {
       try {
         const conversation = session.snapshot.lastCompletedTurnId
           ? await this.conversations.waitUntilTurnPersisted(session.threadId, session.snapshot.lastCompletedTurnId)
           : await this.conversations.readConversation(session.threadId);
-        return conversation.turns.map((turn) => {
+        return { source: "app-server", syncStatus: "synced", message: null, turns: conversation.turns.map((turn) => {
           const user = turn.items.find((item) => item.type === "user")?.text ?? "";
           const agent = [...turn.items].reverse().find((item) => item.type === "agent")?.text ?? "";
           return {
@@ -48,11 +49,17 @@ export class RepositorySessionQueryService implements SessionQueryService {
             promptPreview: preview(user), assistantPreview: preview(agent), startedAt: turn.startedAt,
             completedAt: turn.completedAt, selectedByDefault: turn.status === "completed",
           };
-        });
-      } catch { /* The local Hook cache keeps monitoring usable when App Server is unavailable or still syncing. */ }
+        }) };
+      } catch (error) {
+        const unavailable = error instanceof DomainError && error.code === "APP_SERVER_UNAVAILABLE";
+        synchronization = {
+          syncStatus: unavailable ? "unavailable" : "pending",
+          message: unavailable ? error.message : `Codex 会话仍在同步：${error instanceof Error ? error.message : String(error)}`,
+        };
+      }
     }
     const turns = await this.turns.listBySessionId(sessionId);
-    return turns.map((turn) => ({
+    return { source: "hook-cache", ...synchronization, turns: turns.map((turn) => ({
       id: turn.id,
       sequence: turn.sequence,
       status: turn.status,
@@ -61,7 +68,7 @@ export class RepositorySessionQueryService implements SessionQueryService {
       startedAt: turn.props.startedAt,
       completedAt: turn.props.completedAt,
       selectedByDefault: turn.status === "completed",
-    }));
+    })) };
   }
 }
 
@@ -118,6 +125,7 @@ export interface SettingsApplicationService {
   read(): Promise<ApplicationSettings>;
   update(command: Partial<ApplicationSettings>): Promise<ApplicationSettings>;
   listModels(): Promise<readonly AgentModel[]>;
+  listNotesTargets(): Promise<NotesTargetsView>;
   runtime(): Promise<AppServerRuntimeStatus>;
 }
 
@@ -125,16 +133,21 @@ export class PersistentSettingsApplicationService implements SettingsApplication
   constructor(
     private readonly settings: SettingsRepository,
     private readonly agent: SummaryAgentGateway,
-    private readonly runtimeStatus: AppServerRuntimeStatus,
+    private readonly runtimeStatus: AppServerRuntimeStatusProvider,
+    private readonly notesTargets: NotesTargetGateway,
+    private readonly unitOfWork: UnitOfWork,
   ) {}
   read(): Promise<ApplicationSettings> { return this.settings.read(); }
   async update(command: Partial<ApplicationSettings>): Promise<ApplicationSettings> {
-    const updated = { ...await this.settings.read(), ...command };
-    await this.settings.save(updated);
-    return updated;
+    return this.unitOfWork.execute(async () => {
+      const updated = { ...await this.settings.read(), ...command };
+      await this.settings.save(updated);
+      return updated;
+    });
   }
   listModels(): Promise<readonly AgentModel[]> { return this.agent.listModels(); }
-  runtime(): Promise<AppServerRuntimeStatus> { return Promise.resolve(this.runtimeStatus); }
+  listNotesTargets(): Promise<NotesTargetsView> { return this.notesTargets.listTargets(); }
+  runtime(): Promise<AppServerRuntimeStatus> { return this.runtimeStatus.current(); }
 }
 
 export interface ExportApplicationService {
