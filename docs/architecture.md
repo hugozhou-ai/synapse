@@ -79,6 +79,10 @@ Hook 与 App Server 原始 DTO 分别通过 `CodexHookProtocolMapper`、`CodexPr
 
 主进程日志同时写入控制台与权限为 `0600` 的 `~/Library/Application Support/Synapse/logs/synapse.log`。Hook 安装状态、receiver 生命周期和事件入库使用统一的 `[synapse:hook]` JSON 日志，便于区分“未安装、未信任、未收到、入库失败”四类问题。
 
+`CodexHookManagementService` 同时维护首次 Hook 设置是否已由用户处理。启动时，`ElectronWindowManager` 只在 Hook 未安装且用户从未完成或跳过引导时自动打开设置；安装、明确跳过或主动卸载都会持久化确认状态，避免后续启动反复打扰。
+
+Renderer 顶层由 `RendererErrorBoundary` 隔离渲染异常，并通过类型化 diagnostics IPC 将 `window error`、未处理 Promise 和 React component stack 写入统一的 `[synapse:renderer]` 日志；页面加载失败或 Renderer 进程退出也由主进程记录，避免仅显示无诊断信息的白屏。
+
 总结 thread 使用：
 
 - `ephemeral: true`

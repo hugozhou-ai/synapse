@@ -1,4 +1,4 @@
-export type LogPrefix = "[synapse:hook]" | "[synapse:app-server]" | "[synapse:notes]" | "[synapse:sqlite]" | "[synapse:ipc]" | "[synapse:main]";
+export type LogPrefix = "[synapse:hook]" | "[synapse:app-server]" | "[synapse:notes]" | "[synapse:sqlite]" | "[synapse:ipc]" | "[synapse:main]" | "[synapse:renderer]";
 
 export interface Logger {
   info(prefix: LogPrefix, message: string, fields?: unknown): void;

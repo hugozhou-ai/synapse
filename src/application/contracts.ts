@@ -120,3 +120,10 @@ export interface SaveProfileCommand {
   readonly instructions: string;
   readonly isDefault: boolean;
 }
+
+export interface RendererErrorReport {
+  readonly kind: "window-error" | "unhandled-rejection" | "react-error";
+  readonly message: string;
+  readonly stack: string | null;
+  readonly componentStack: string | null;
+}

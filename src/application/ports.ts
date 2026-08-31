@@ -153,6 +153,7 @@ export interface SummarySearchResult {
 
 export interface HookInstallationStatus {
   readonly installed: boolean;
+  readonly onboardingRequired: boolean;
   readonly relayPath: string;
   readonly configPath: string;
   readonly trustStates: readonly HookTrustState[];
@@ -194,7 +195,10 @@ export interface ApplicationSettings {
   readonly widgetVisible: boolean;
   readonly widgetPositions: Readonly<Record<string, { x: number; y: number }>>;
   readonly widgetDisplayId: string | null;
+  readonly hookSetupAcknowledged: boolean;
 }
+
+export type ApplicationSettingsUpdate = Partial<Omit<ApplicationSettings, "hookSetupAcknowledged">>;
 
 export interface AppServerRuntimeStatus {
   readonly state: "initializing" | "available" | "unavailable";

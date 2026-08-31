@@ -273,7 +273,7 @@ export class SqliteOutboxRepository implements OutboxRepository {
 
 const defaultSettings: ApplicationSettings = {
   codexBinaryPath: null, summaryModel: null, syncNotesByDefault: false, notesAccount: null,
-  notesFolder: "Synapse", widgetVisible: true, widgetPositions: {}, widgetDisplayId: null,
+  notesFolder: "Synapse", widgetVisible: true, widgetPositions: {}, widgetDisplayId: null, hookSetupAcknowledged: false,
 };
 
 export class SqliteSettingsRepository implements SettingsRepository {

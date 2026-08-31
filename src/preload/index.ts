@@ -21,8 +21,12 @@ const api: SynapseApi = {
   },
   profiles: { list: () => invoke("profiles:list"), save: (command) => invoke("profiles:save", command), delete: (id) => invoke("profiles:delete", id) },
   settings: { read: () => invoke("settings:read"), update: (command) => invoke("settings:update", command), models: () => invoke("settings:models"), notesTargets: () => invoke("settings:notes-targets"), runtime: () => invoke("settings:runtime") },
-  hooks: { inspect: () => invoke("hooks:inspect"), install: () => invoke("hooks:install"), uninstall: () => invoke("hooks:uninstall") },
+  hooks: {
+    inspect: () => invoke("hooks:inspect"), install: () => invoke("hooks:install"), uninstall: () => invoke("hooks:uninstall"),
+    dismissOnboarding: () => invoke("hooks:dismiss-onboarding"),
+  },
   export: { markdown: (id) => invoke("export:markdown", id), json: (id) => invoke("export:json", id), revealDatabase: () => invoke("export:reveal-database") },
+  diagnostics: { reportRendererError: (report) => invoke("diagnostics:renderer-error", report) },
   window: {
     openHistory: () => invoke("window:history"), openQueue: () => invoke("window:queue"), openSettings: () => invoke("window:settings"),
     openSummary: (id) => invoke("window:summary", id), resizeWidget: (expanded) => invoke("window:resize-widget", expanded),

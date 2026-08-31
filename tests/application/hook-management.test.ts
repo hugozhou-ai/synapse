@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { CodexHookManagementService } from "@application/hook-management";
-import type { CodexHookConfigStore, CodexSessionRepository, HookInstallManifest, HookRelayInstaller, HookTrustGateway } from "@application/ports";
+import type { ApplicationSettings, CodexHookConfigStore, CodexSessionRepository, HookInstallManifest, HookRelayInstaller, HookTrustGateway, SettingsRepository } from "@application/ports";
 import type { Logger } from "@shared/logger";
 
 const manifest: HookInstallManifest = { command: "/support/relay", featureEnabledByInstaller: true, installedAt: "2026-01-01T00:00:00.000Z" };
@@ -8,7 +8,7 @@ const manifest: HookInstallManifest = { command: "/support/relay", featureEnable
 describe("CodexHookManagementService", () => {
   it("does not report an incomplete installation as healthy", async () => {
     const service = createService({ hooks: {} }, { inspect: vi.fn().mockResolvedValue([]) });
-    await expect(service.inspect()).resolves.toMatchObject({ installed: false, message: "Synapse Hook 安装不完整，请点击“修复安装”。" });
+    await expect(service.inspect()).resolves.toMatchObject({ installed: false, onboardingRequired: true, message: "Synapse Hook 安装不完整，请点击“修复安装”。" });
   });
 
   it("keeps Hook awareness available when App Server trust inspection fails", async () => {
@@ -22,21 +22,40 @@ describe("CodexHookManagementService", () => {
 
   it("instructs first-time users to trust an installed Hook when no cwd is known", async () => {
     const service = createService(ownedConfiguration(), { inspect: vi.fn().mockResolvedValue([]) });
-    await expect(service.inspect()).resolves.toMatchObject({ installed: true, message: expect.stringContaining("/hooks") });
+    await expect(service.inspect()).resolves.toMatchObject({ installed: true, onboardingRequired: false, message: expect.stringContaining("/hooks") });
+  });
+
+  it("does not repeat onboarding after the user explicitly dismisses it", async () => {
+    const service = createService({ hooks: {} }, { inspect: vi.fn().mockResolvedValue([]) });
+    expect((await service.inspect()).onboardingRequired).toBe(true);
+    expect((await service.dismissOnboarding()).onboardingRequired).toBe(false);
+  });
+
+  it("does not reopen first-run onboarding after an intentional uninstall", async () => {
+    const service = createService(ownedConfiguration(), { inspect: vi.fn().mockResolvedValue([]) });
+    expect((await service.inspect()).installed).toBe(true);
+    await expect(service.uninstall()).resolves.toMatchObject({ installed: false, onboardingRequired: false });
   });
 });
 
 function createService(raw: Record<string, unknown>, trust: HookTrustGateway, logger: Logger = { info() {}, error() {} }) {
+  let currentRaw = raw;
+  let currentManifest: HookInstallManifest | null = manifest;
+  let relayInstalled = true;
+  let currentSettings: ApplicationSettings = {
+    codexBinaryPath: null, summaryModel: null, syncNotesByDefault: false, notesAccount: null, notesFolder: "Synapse",
+    widgetVisible: true, widgetPositions: {}, widgetDisplayId: null, hookSetupAcknowledged: false,
+  };
   const config: CodexHookConfigStore = {
-    read: vi.fn().mockResolvedValue({ raw, manifest }),
-    mergeOwnedHooks: vi.fn().mockResolvedValue(manifest),
-    removeOwnedHooks: vi.fn().mockResolvedValue(undefined),
+    read: vi.fn().mockImplementation(async () => ({ raw: currentRaw, manifest: currentManifest })),
+    mergeOwnedHooks: vi.fn().mockImplementation(async () => { currentRaw = ownedConfiguration(); currentManifest = manifest; return manifest; }),
+    removeOwnedHooks: vi.fn().mockImplementation(async () => { currentRaw = { hooks: {} }; currentManifest = null; }),
   };
   const relay: HookRelayInstaller = {
     relayPath: manifest.command,
-    install: vi.fn().mockResolvedValue(undefined),
-    uninstall: vi.fn().mockResolvedValue(undefined),
-    exists: vi.fn().mockResolvedValue(true),
+    install: vi.fn().mockImplementation(async () => { relayInstalled = true; }),
+    uninstall: vi.fn().mockImplementation(async () => { relayInstalled = false; }),
+    exists: vi.fn().mockImplementation(async () => relayInstalled),
   };
   const sessions: CodexSessionRepository = {
     findById: vi.fn().mockResolvedValue(null),
@@ -45,7 +64,11 @@ function createService(raw: Record<string, unknown>, trust: HookTrustGateway, lo
     listWidgetQueue: vi.fn().mockResolvedValue([]),
     search: vi.fn().mockResolvedValue([]),
   };
-  return new CodexHookManagementService(config, relay, trust, sessions, "/codex/hooks.json", logger);
+  const settings: SettingsRepository = {
+    read: vi.fn().mockImplementation(async () => currentSettings),
+    save: vi.fn().mockImplementation(async (value: ApplicationSettings) => { currentSettings = value; }),
+  };
+  return new CodexHookManagementService(config, relay, trust, sessions, "/codex/hooks.json", logger, settings);
 }
 
 function ownedConfiguration(): Record<string, unknown> {

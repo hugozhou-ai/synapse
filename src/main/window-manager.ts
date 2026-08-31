@@ -27,8 +27,18 @@ export class ElectronWindowManager {
     await this.load(this.widget, "widget");
     if (settings.widgetVisible) this.widget.showInactive();
     this.createTray();
-    const hooks = await this.hookManagement.inspect();
-    if (!hooks.installed) this.logger.error("[synapse:hook]", "session-awareness-disabled", { message: hooks.message ?? "Hook is not installed." });
+    try {
+      const hooks = await this.hookManagement.inspect();
+      if (!hooks.installed) this.logger.error("[synapse:hook]", "session-awareness-disabled", { message: hooks.message ?? "Hook is not installed." });
+      if (hooks.onboardingRequired) {
+        this.logger.info("[synapse:hook]", "setup-onboarding-opened", {});
+        await this.openSettings();
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error("[synapse:hook]", "installation-status-inspection-failed", { message });
+      await this.openSettings();
+    }
   }
 
   async openHistory(): Promise<void> { await this.openWorkspace("history"); }
@@ -57,7 +67,7 @@ export class ElectronWindowManager {
   resizeWidget(expanded: boolean): void { this.widget?.setSize(380, expanded ? 390 : 88, true); }
 
   private createWindow(options: Electron.BrowserWindowConstructorOptions): BrowserWindow {
-    return new BrowserWindow({
+    const window = new BrowserWindow({
       ...options,
       webPreferences: {
         preload: join(__dirname, "../preload/index.mjs"),
@@ -66,6 +76,13 @@ export class ElectronWindowManager {
         sandbox: true,
       },
     });
+    window.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      this.logger.error("[synapse:renderer]", "page-load-failed", { errorCode, errorDescription, validatedURL, isMainFrame });
+    });
+    window.webContents.on("render-process-gone", (_event, details) => {
+      this.logger.error("[synapse:renderer]", "process-gone", details);
+    });
+    return window;
   }
 
   private async load(window: BrowserWindow, route: string): Promise<void> {

@@ -4,7 +4,7 @@ import type { ElectronApplicationContainer } from "./container";
 import type { ElectronWindowManager } from "./window-manager";
 import { DomainError } from "@domain/shared";
 import { PublicationTarget } from "@domain/summary";
-import type { ApplicationSettings, SummarySearchCriteria } from "@application/ports";
+import type { ApplicationSettingsUpdate, SummarySearchCriteria } from "@application/ports";
 import type { SaveProfileCommand } from "@application/contracts";
 
 const idSchema = z.string().min(1);
@@ -18,6 +18,10 @@ const settingsSchema = z.object({
   notesAccount: z.string().nullable(), notesFolder: z.string().min(1), widgetVisible: z.boolean(),
   widgetPositions: z.record(z.string(), z.object({ x: z.number(), y: z.number() })), widgetDisplayId: z.string().nullable(),
 }).partial();
+const rendererErrorSchema = z.object({
+  kind: z.enum(["window-error", "unhandled-rejection", "react-error"]),
+  message: z.string().max(4_000), stack: z.string().max(20_000).nullable(), componentStack: z.string().max(20_000).nullable(),
+});
 
 export class ElectronIpcController {
   constructor(private readonly container: ElectronApplicationContainer, private readonly windows: ElectronWindowManager) {}
@@ -42,16 +46,20 @@ export class ElectronIpcController {
     this.handle("profiles:save", z.object({ id: idSchema.optional(), name: z.string().min(1), kind: z.enum(["template", "systemPrompt"]), instructions: z.string().min(1), isDefault: z.boolean() }), (value) => this.container.profiles.save(compactObject<SaveProfileCommand>(value)));
     this.handle("profiles:delete", idSchema, (id) => this.container.profiles.delete(id));
     this.handle("settings:read", z.unknown(), () => this.container.settings.read());
-    this.handle("settings:update", settingsSchema, (value) => this.container.settings.update(compactObject<Partial<ApplicationSettings>>(value)));
+    this.handle("settings:update", settingsSchema, (value) => this.container.settings.update(compactObject<ApplicationSettingsUpdate>(value)));
     this.handle("settings:models", z.unknown(), () => this.container.settings.listModels());
     this.handle("settings:notes-targets", z.unknown(), () => this.container.settings.listNotesTargets());
     this.handle("settings:runtime", z.unknown(), () => this.container.settings.runtime());
     this.handle("hooks:inspect", z.unknown(), () => this.container.hookManagement.inspect());
     this.handle("hooks:install", z.unknown(), () => this.container.hookManagement.install());
     this.handle("hooks:uninstall", z.unknown(), () => this.container.hookManagement.uninstall());
+    this.handle("hooks:dismiss-onboarding", z.unknown(), () => this.container.hookManagement.dismissOnboarding());
     this.handle("export:markdown", idSchema, (id) => this.container.exports.markdown(id));
     this.handle("export:json", idSchema, (id) => this.container.exports.json(id));
     this.handle("export:reveal-database", z.unknown(), () => this.container.exports.revealDatabaseDirectory());
+    this.handle("diagnostics:renderer-error", rendererErrorSchema, (report) => {
+      this.container.logger.error("[synapse:renderer]", "uncaught-error", report);
+    });
     this.handle("window:history", z.unknown(), () => this.windows.openHistory());
     this.handle("window:queue", z.unknown(), () => this.windows.openQueue());
     this.handle("window:settings", z.unknown(), () => this.windows.openSettings());

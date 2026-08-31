@@ -53,7 +53,7 @@ describe("SQLite repository contract", () => {
       });
       await enteredTransaction;
       let outsideCompleted = false;
-      const outside = settings.save({ codexBinaryPath: null, summaryModel: "model", syncNotesByDefault: false, notesAccount: null, notesFolder: "Synapse", widgetVisible: true, widgetPositions: {}, widgetDisplayId: null }).then(() => { outsideCompleted = true; });
+      const outside = settings.save({ codexBinaryPath: null, summaryModel: "model", syncNotesByDefault: false, notesAccount: null, notesFolder: "Synapse", widgetVisible: true, widgetPositions: {}, widgetDisplayId: null, hookSetupAcknowledged: false }).then(() => { outsideCompleted = true; });
       await new Promise((resolve) => setTimeout(resolve, 20));
       expect(outsideCompleted).toBe(false);
       unblock();

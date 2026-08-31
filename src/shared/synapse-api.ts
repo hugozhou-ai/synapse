@@ -1,5 +1,5 @@
-import type { AgentModel, ApplicationSettings, AppServerRuntimeStatus, HookInstallationStatus, SummarySearchCriteria, SummarySearchResult } from "@application/ports";
-import type { ConversationTurnsView, FinalizeSummaryCommand, FinalizedSummaryView, GenerateSummaryCommand, NotesTargetsView, RegenerateSummaryCommand, SaveProfileCommand, SummaryDetailView, SummaryDraft, SummaryProfileView, UpdateDraftCommand, WidgetSessionView } from "@application/contracts";
+import type { AgentModel, ApplicationSettings, ApplicationSettingsUpdate, AppServerRuntimeStatus, HookInstallationStatus, SummarySearchCriteria, SummarySearchResult } from "@application/ports";
+import type { ConversationTurnsView, FinalizeSummaryCommand, FinalizedSummaryView, GenerateSummaryCommand, NotesTargetsView, RegenerateSummaryCommand, RendererErrorReport, SaveProfileCommand, SummaryDetailView, SummaryDraft, SummaryProfileView, UpdateDraftCommand, WidgetSessionView } from "@application/contracts";
 
 export interface SynapseApi {
   sessions: {
@@ -23,7 +23,7 @@ export interface SynapseApi {
   };
   settings: {
     read(): Promise<ApplicationSettings>;
-    update(command: Partial<ApplicationSettings>): Promise<ApplicationSettings>;
+    update(command: ApplicationSettingsUpdate): Promise<ApplicationSettings>;
     models(): Promise<readonly AgentModel[]>;
     notesTargets(): Promise<NotesTargetsView>;
     runtime(): Promise<AppServerRuntimeStatus>;
@@ -32,11 +32,15 @@ export interface SynapseApi {
     inspect(): Promise<HookInstallationStatus>;
     install(): Promise<HookInstallationStatus>;
     uninstall(): Promise<HookInstallationStatus>;
+    dismissOnboarding(): Promise<HookInstallationStatus>;
   };
   export: {
     markdown(documentId: string): Promise<string | null>;
     json(documentId: string): Promise<string | null>;
     revealDatabase(): Promise<void>;
+  };
+  diagnostics: {
+    reportRendererError(report: RendererErrorReport): Promise<void>;
   };
   window: {
     openHistory(): Promise<void>;

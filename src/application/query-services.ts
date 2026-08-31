@@ -1,5 +1,5 @@
 import { SummaryProfile } from "@domain/summary";
-import type { AgentModel, ApplicationSettings, AppServerRuntimeStatus, AppServerRuntimeStatusProvider, Clock, CodexSessionRepository, CodexTurnRepository, ConversationGateway, ExportGateway, IdGenerator, NotesTargetGateway, SettingsRepository, SummaryAgentGateway, SummaryDocumentRepository, SummaryProfileRepository, SummarySearchCriteria, SummarySearchResult, UnitOfWork } from "./ports";
+import type { AgentModel, ApplicationSettings, ApplicationSettingsUpdate, AppServerRuntimeStatus, AppServerRuntimeStatusProvider, Clock, CodexSessionRepository, CodexTurnRepository, ConversationGateway, ExportGateway, IdGenerator, NotesTargetGateway, SettingsRepository, SummaryAgentGateway, SummaryDocumentRepository, SummaryProfileRepository, SummarySearchCriteria, SummarySearchResult, UnitOfWork } from "./ports";
 import type { ConversationTurnsView, NotesTargetsView, SaveProfileCommand, SummaryDetailView, SummaryProfileView, WidgetSessionView } from "./contracts";
 import { DomainError } from "@domain/shared";
 
@@ -123,7 +123,7 @@ function toProfileView(profile: SummaryProfile): SummaryProfileView {
 
 export interface SettingsApplicationService {
   read(): Promise<ApplicationSettings>;
-  update(command: Partial<ApplicationSettings>): Promise<ApplicationSettings>;
+  update(command: ApplicationSettingsUpdate): Promise<ApplicationSettings>;
   listModels(): Promise<readonly AgentModel[]>;
   listNotesTargets(): Promise<NotesTargetsView>;
   runtime(): Promise<AppServerRuntimeStatus>;
@@ -138,7 +138,7 @@ export class PersistentSettingsApplicationService implements SettingsApplication
     private readonly unitOfWork: UnitOfWork,
   ) {}
   read(): Promise<ApplicationSettings> { return this.settings.read(); }
-  async update(command: Partial<ApplicationSettings>): Promise<ApplicationSettings> {
+  async update(command: ApplicationSettingsUpdate): Promise<ApplicationSettings> {
     return this.unitOfWork.execute(async () => {
       const updated = { ...await this.settings.read(), ...command };
       await this.settings.save(updated);
