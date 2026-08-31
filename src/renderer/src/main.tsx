@@ -3,7 +3,10 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { App } from "./App";
 import { RendererErrorBoundary } from "./components/RendererErrorBoundary";
+import { resolveRendererSurface } from "./lib/renderer-surface";
 import "./styles.css";
+
+document.documentElement.dataset.surface = resolveRendererSurface(location.hash);
 
 window.addEventListener("error", (event) => {
   void window.synapse.diagnostics.reportRendererError({

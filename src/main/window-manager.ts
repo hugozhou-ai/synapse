@@ -21,7 +21,7 @@ export class ElectronWindowManager {
 
   async start(): Promise<void> {
     const settings = await this.settings.read();
-    this.widget = this.createWindow({ width: 380, height: 88, transparent: true, frame: false, resizable: false, skipTaskbar: true, alwaysOnTop: true });
+    this.widget = this.createWindow({ width: 380, height: 88, transparent: true, backgroundColor: "#00000000", frame: false, resizable: false, skipTaskbar: true, alwaysOnTop: true });
     this.widget.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     this.widget.setAlwaysOnTop(true, "floating");
     this.placeWidget(settings.widgetPositions, settings.widgetDisplayId);

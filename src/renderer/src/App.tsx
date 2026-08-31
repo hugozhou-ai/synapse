@@ -1,6 +1,7 @@
 import { Widget } from "./features/widget/Widget";
 import { Workspace } from "./features/workspace/Workspace";
+import { resolveRendererSurface } from "./lib/renderer-surface";
 
 export function App() {
-  return location.hash.startsWith("#/widget") ? <Widget /> : <Workspace />;
+  return resolveRendererSurface(location.hash) === "widget" ? <Widget /> : <Workspace />;
 }
