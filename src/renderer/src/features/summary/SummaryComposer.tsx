@@ -5,6 +5,7 @@ import type { ApplicationSettings } from "@application/ports";
 import type { ConversationTurnsView, NotesTargetsView, SummaryContentView, SummaryProfileView } from "@application/contracts";
 import { ErrorBanner, InfoBanner, PageHeader } from "../../components/common";
 import { NotesTargetPicker } from "../../components/NotesTargetPicker";
+import { Select } from "../../components/Select";
 import { useSummaryDraft } from "../../hooks/use-summary-draft";
 import { messageOf } from "../../lib/format";
 import { TurnSelector } from "./TurnSelector";
@@ -69,7 +70,7 @@ export function SummaryComposer({ sessionId, onClose }: { sessionId: string; onC
       <section className="panel turns-panel"><div className="panel-head"><div><h2>选择 turns</h2><p>默认选中已完成 turn；失败或中断的 turn 需手动纳入。</p></div><div className="selection-actions"><button onClick={() => setSelected(new Set(turns.filter((turn) => turn.status !== "running").map((turn) => turn.id)))}>全选</button><button onClick={() => setSelected(new Set())}>取消</button></div></div>
         <TurnSelector turns={turns} selected={selected} onChange={setSelected} />
       </section>
-      <aside className="panel generation-panel"><h2>整理设置</h2><label>整理方案<select value={profileId} onChange={(event) => setProfileId(event.target.value)}>{profiles.map((profile) => <option value={profile.id} key={profile.id}>{profile.name}</option>)}</select></label>
+      <aside className="panel generation-panel"><h2>整理设置</h2><label>整理方案<Select ariaLabel="整理方案" value={profileId} onChange={setProfileId} options={profiles.map((profile) => ({ value: profile.id, label: profile.name }))} /></label>
         <div className="profile-preview"><span>{profiles.find((profile) => profile.id === profileId)?.kind === "template" ? "Markdown 模板" : "系统提示词"}</span><p>{profiles.find((profile) => profile.id === profileId)?.instructions.slice(0, 240)}</p></div>
         <label className="toggle-row"><input type="checkbox" checked={syncNotes} onChange={(event) => setSyncNotes(event.target.checked)} /><span className="toggle" /><div><strong>同步到 Apple Notes</strong><small>{notesFolder || "未选择文件夹"} · 仅 final 后执行</small></div></label>
         {syncNotes && <NotesTargetPicker targets={notesTargets} account={notesAccount} folder={notesFolder} onAccountChange={setNotesAccount} onFolderChange={setNotesFolder} />}

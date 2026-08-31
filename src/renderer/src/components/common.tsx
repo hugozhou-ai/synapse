@@ -2,7 +2,10 @@ import type { ReactNode } from "react";
 import { CircleAlert } from "lucide-react";
 
 export function PageHeader({ eyebrow, title, description, actions }: { eyebrow: string; title: string; description: string; actions?: ReactNode }) {
-  return <header className="page-header"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{description}</p></div>{actions && <div className="header-actions">{actions}</div>}</header>;
+  return <header className="page-header">
+    <div className="page-title-block"><span className="eyebrow">{eyebrow}</span><h1>{title}</h1></div>
+    <div className="page-header-meta"><p>{description}</p>{actions && <div className="header-actions">{actions}</div>}</div>
+  </header>;
 }
 
 export function ErrorBanner({ message }: { message: string }) {

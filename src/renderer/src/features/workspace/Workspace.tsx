@@ -12,13 +12,13 @@ export function Workspace() {
   const sessionId = route.startsWith("summary/") ? route.slice(8) : null;
   return <div className="workspace-shell">
     <aside className="sidebar">
-      <div className="brand"><div className="brand-icon"><Sparkles size={17} /></div><div><strong>Synapse</strong><span>Codex memory</span></div></div>
+      <div className="brand"><div className="brand-icon"><Sparkles size={17} /></div><div><strong>Synapse</strong><span>Local / Codex memory</span></div></div>
       <nav aria-label="主导航">
-        <NavButton active={route === "queue" || Boolean(sessionId)} icon={<Archive size={17} />} label="任务队列" onClick={() => setRoute("queue")} />
-        <NavButton active={route === "history"} icon={<History size={17} />} label="总结历史" onClick={() => setRoute("history")} />
-        <NavButton active={route === "settings"} icon={<Settings size={17} />} label="设置" onClick={() => setRoute("settings")} />
+        <NavButton index="01" active={route === "queue" || Boolean(sessionId)} icon={<Archive size={17} />} label="任务队列" onClick={() => setRoute("queue")} />
+        <NavButton index="02" active={route === "history"} icon={<History size={17} />} label="总结历史" onClick={() => setRoute("history")} />
+        <NavButton index="03" active={route === "settings"} icon={<Settings size={17} />} label="设置" onClick={() => setRoute("settings")} />
       </nav>
-      <div className="sidebar-foot"><span className="live-dot" /> 本地运行 · 数据不离开设备</div>
+      <div className="sidebar-foot"><span className="live-dot" /><span>LOCAL PROCESS<br />DATA STAYS HERE</span></div>
     </aside>
     <section className="content-shell">
       {sessionId ? <SummaryComposer sessionId={sessionId} onClose={() => setRoute("queue")} /> : route === "queue" ? <QueuePage onSummarize={(id) => setRoute(`summary/${id}`)} onOpenSettings={() => setRoute("settings")} /> : route === "history" ? <HistoryPage /> : <SettingsPage />}
@@ -26,6 +26,6 @@ export function Workspace() {
   </div>;
 }
 
-function NavButton({ active, icon, label, onClick }: { active: boolean; icon: ReactNode; label: string; onClick(): void }) {
-  return <button className={`nav-button ${active ? "active" : ""}`} aria-current={active ? "page" : undefined} onClick={onClick}>{icon}<span>{label}</span></button>;
+function NavButton({ index, active, icon, label, onClick }: { index: string; active: boolean; icon: ReactNode; label: string; onClick(): void }) {
+  return <button className={`nav-button ${active ? "active" : ""}`} aria-current={active ? "page" : undefined} onClick={onClick}><small>{index}</small>{icon}<span>{label}</span></button>;
 }

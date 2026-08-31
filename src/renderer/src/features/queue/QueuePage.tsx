@@ -9,7 +9,7 @@ export function QueuePage({ onSummarize, onOpenSettings }: { onSummarize(id: str
   const { status: hooks } = useHookInstallation();
   return <div className="page">
     <PageHeader eyebrow="LIVE QUEUE" title="任务队列" description="正在进行与刚结束的 Codex 任务。完成的任务会留在这里，直到你总结或忽略。" actions={<button className="secondary" onClick={reload}><RefreshCw size={15} /> 刷新</button>} />
-    <div className="metric-row"><Metric label="正在进行" value={sessions.filter((session) => session.status === "running").length} tone="ink" /><Metric label="待总结" value={sessions.filter((session) => session.status === "ready").length} tone="orange" /><Metric label="已观察" value={sessions.length} tone="sage" /></div>
+    <div className="metric-row"><Metric label="正在进行" value={sessions.filter((session) => session.status === "running").length} tone="base" /><Metric label="待总结" value={sessions.filter((session) => session.status === "ready").length} tone="accent" /><Metric label="已观察" value={sessions.length} tone="muted" /></div>
     <div className="queue-list">
       {sessions.map((session) => <article className="queue-card" key={session.id}>
         <div className={`queue-status ${session.status}`}><span className="live-dot" /><span>{statusLabel(session.status)}</span></div>
@@ -21,6 +21,6 @@ export function QueuePage({ onSummarize, onOpenSettings }: { onSummarize(id: str
   </div>;
 }
 
-function Metric({ label, value, tone }: { label: string; value: number; tone: string }) {
+function Metric({ label, value, tone }: { label: string; value: number; tone: "base" | "accent" | "muted" }) {
   return <div className={`metric ${tone}`}><strong>{value}</strong><span>{label}</span></div>;
 }
