@@ -6,6 +6,7 @@ import type { Logger } from "@shared/logger";
 import { resolveWidgetBounds, WIDGET_COLLAPSED_SIZE, type WidgetBounds } from "@shared/widget-layout";
 import { resolveRendererUrl } from "./renderer-url";
 import { resolveAnchoredWidgetBounds, resolveWidgetPlacement } from "./widget-placement";
+import { WorkspaceDockController } from "./workspace-dock";
 
 type WorkspaceRoute = "queue" | "history" | "settings" | `history/${string}` | `summary/${string}`;
 interface WidgetAnchor { readonly displayId: string; readonly right: number; readonly y: number; }
@@ -17,17 +18,21 @@ export class ElectronWindowManager {
   private tray: Tray | null = null;
   private widgetAnchor: WidgetAnchor | null = null;
   private widgetDragOrigin: WidgetDragOrigin | null = null;
+  private readonly workspaceDock: WorkspaceDockController;
 
   constructor(
     private readonly settings: SettingsApplicationService,
     private readonly hookManagement: HookManagementService,
     private readonly logger: Logger,
-  ) {}
+  ) {
+    this.workspaceDock = new WorkspaceDockController(this.resolveWorkspaceDock());
+  }
 
   async start(): Promise<void> {
     const settings = await this.settings.read();
     const collapsedBounds = resolveWidgetBounds("collapsed", 0);
     this.configureDevelopmentDockIcon();
+    this.workspaceDock.hide();
     this.widget = this.createWindow({ width: collapsedBounds.width, height: collapsedBounds.height, transparent: true, backgroundColor: "#00000000", frame: false, resizable: false, skipTaskbar: true, alwaysOnTop: true });
     this.widget.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     this.widget.setAlwaysOnTop(true, "floating");
@@ -62,8 +67,12 @@ export class ElectronWindowManager {
 
   private async openWorkspace(route: WorkspaceRoute): Promise<void> {
     if (!this.workspace || this.workspace.isDestroyed()) {
+      await this.workspaceDock.show();
       this.workspace = this.createWindow({ width: 1180, height: 760, minWidth: 900, minHeight: 620, titleBarStyle: "hiddenInset", backgroundColor: "#fafaf7" });
-      this.workspace.on("closed", () => { this.workspace = null; });
+      this.workspace.on("closed", () => {
+        this.workspace = null;
+        this.workspaceDock.hide();
+      });
       await this.load(this.workspace, route);
     } else {
       this.workspace.webContents.send("synapse:navigate", route);
@@ -185,10 +194,17 @@ export class ElectronWindowManager {
 
   private configureDevelopmentDockIcon(): void {
     if (process.platform !== "darwin" || app.isPackaged) return;
-    if (!app.dock) throw new Error("Unable to configure the Dock icon because the Dock API is unavailable.");
+    const dock = this.resolveWorkspaceDock();
+    if (!dock) throw new Error("Unable to configure the Dock icon because the Dock API is unavailable.");
     const dockIconPath = join(app.getAppPath(), "build", "icon-master.png");
     const image = nativeImage.createFromPath(dockIconPath);
     if (image.isEmpty()) throw new Error(`Unable to load Dock icon at ${dockIconPath}.`);
-    app.dock.setIcon(image);
+    dock.setIcon(image);
+  }
+
+  private resolveWorkspaceDock(): Electron.Dock | null {
+    if (process.platform !== "darwin") return null;
+    if (!app.dock) throw new Error("Unable to manage the Dock icon because the Dock API is unavailable.");
+    return app.dock;
   }
 }
