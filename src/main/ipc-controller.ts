@@ -6,6 +6,7 @@ import { DomainError } from "@domain/shared";
 import { PublicationTarget } from "@domain/summary";
 import type { ApplicationSettingsUpdate, SummarySearchCriteria } from "@application/ports";
 import type { SaveProfileCommand } from "@application/contracts";
+import { WIDGET_COLLAPSED_SIZE, WIDGET_EXPANDED_WIDTH, WIDGET_MAX_HEIGHT } from "@shared/widget-layout";
 
 const idSchema = z.string().min(1);
 const summaryContentSchema = z.object({ title: z.string().min(1), abstract: z.string(), bodyMarkdown: z.string(), tags: z.array(z.string()) });
@@ -22,6 +23,7 @@ const rendererErrorSchema = z.object({
   kind: z.enum(["window-error", "unhandled-rejection", "react-error"]),
   message: z.string().max(4_000), stack: z.string().max(20_000).nullable(), componentStack: z.string().max(20_000).nullable(),
 });
+const pointerPositionSchema = z.object({ x: z.number().finite(), y: z.number().finite() });
 
 export class ElectronIpcController {
   constructor(private readonly container: ElectronApplicationContainer, private readonly windows: ElectronWindowManager) {}
@@ -70,7 +72,13 @@ export class ElectronIpcController {
     this.handle("window:queue", z.unknown(), () => this.windows.openQueue());
     this.handle("window:settings", z.unknown(), () => this.windows.openSettings());
     this.handle("window:summary-result", idSchema, (id) => this.windows.openSummaryResult(id));
-    this.handle("window:resize-widget", z.boolean(), (expanded) => { this.windows.resizeWidget(expanded); });
+    this.handle("window:resize-widget", z.object({
+      width: z.union([z.literal(WIDGET_COLLAPSED_SIZE), z.literal(WIDGET_EXPANDED_WIDTH)]),
+      height: z.number().int().min(WIDGET_COLLAPSED_SIZE).max(WIDGET_MAX_HEIGHT),
+    }), (bounds) => { this.windows.resizeWidget(bounds); });
+    this.handle("window:widget-drag-start", pointerPositionSchema, (pointer) => { this.windows.beginWidgetDrag(pointer); });
+    this.handle("window:widget-drag-move", pointerPositionSchema, (pointer) => { this.windows.moveWidgetDrag(pointer); });
+    this.handle("window:widget-drag-end", z.unknown(), () => { this.windows.endWidgetDrag(); });
   }
 
   private handle<Input, Output>(channel: string, schema: z.ZodType<Input>, action: (input: Input) => Promise<Output> | Output): void {

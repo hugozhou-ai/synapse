@@ -1,5 +1,6 @@
 import type { AgentModel, ApplicationSettings, ApplicationSettingsUpdate, AppServerRuntimeStatus, HookInstallationStatus, SummarySearchCriteria, SummarySearchResult } from "@application/ports";
 import type { ConversationTurnsView, FinalizeSummaryCommand, FinalizedSummaryView, GenerateSummaryCommand, NotesTargetsView, RegenerateSummaryCommand, RendererErrorReport, SaveProfileCommand, SummaryDetailView, SummaryDraft, SummaryProfileView, UpdateDraftCommand, WidgetSessionView } from "@application/contracts";
+import type { WidgetBounds } from "./widget-layout";
 
 export interface SynapseApi {
   sessions: {
@@ -50,7 +51,11 @@ export interface SynapseApi {
     openQueue(): Promise<void>;
     openSettings(): Promise<void>;
     openSummaryResult(documentId: string): Promise<void>;
-    resizeWidget(expanded: boolean): Promise<void>;
+    resizeWidget(bounds: WidgetBounds): Promise<void>;
+    beginWidgetDrag(pointer: { x: number; y: number }): Promise<void>;
+    moveWidgetDrag(pointer: { x: number; y: number }): Promise<void>;
+    endWidgetDrag(): Promise<void>;
+    onWidgetBlur(listener: () => void): () => void;
     onSessionsChanged(listener: () => void): () => void;
     onNavigate(listener: (path: string) => void): () => void;
   };

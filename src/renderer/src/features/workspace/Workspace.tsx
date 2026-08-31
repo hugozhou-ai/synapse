@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Archive, History, Settings, Sparkles } from "lucide-react";
+import { Archive, History, Settings } from "lucide-react";
+import { SynapseLogo } from "../../components/SynapseLogo";
 import { HistoryPage } from "../history/HistoryPage";
 import { QueuePage } from "../queue/QueuePage";
 import { SettingsPage } from "../settings/SettingsPage";
@@ -13,7 +14,7 @@ export function Workspace() {
   const historyDocumentId = historyWorkspaceDocumentId(route);
   return <div className="workspace-shell">
     <aside className="sidebar">
-      <div className="brand"><div className="brand-icon"><Sparkles size={17} /></div><div><strong>Synapse</strong><span>Local / Codex memory</span></div></div>
+      <div className="brand"><div className="brand-icon"><SynapseLogo decorative /></div><div><strong>Synapse</strong><span>Local / Codex memory</span></div></div>
       <nav aria-label="主导航">
         <NavButton index="01" active={route === "queue" || Boolean(summaryRoute)} icon={<Archive size={17} />} label="任务队列" onClick={() => setRoute("queue")} />
         <NavButton index="02" active={route === "history" || historyDocumentId !== null} icon={<History size={17} />} label="总结历史" onClick={() => setRoute("history")} />

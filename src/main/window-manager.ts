@@ -3,15 +3,20 @@ import { join } from "node:path";
 import type { HookManagementService } from "@application/hook-management";
 import type { SettingsApplicationService } from "@application/query-services";
 import type { Logger } from "@shared/logger";
+import { resolveWidgetBounds, WIDGET_COLLAPSED_SIZE, type WidgetBounds } from "@shared/widget-layout";
 import { resolveRendererUrl } from "./renderer-url";
-import { resolveWidgetPlacement } from "./widget-placement";
+import { resolveAnchoredWidgetBounds, resolveWidgetPlacement } from "./widget-placement";
 
 type WorkspaceRoute = "queue" | "history" | "settings" | `history/${string}` | `summary/${string}`;
+interface WidgetAnchor { readonly displayId: string; readonly right: number; readonly y: number; }
+interface WidgetDragOrigin { readonly pointerX: number; readonly pointerY: number; readonly windowX: number; readonly windowY: number; }
 
 export class ElectronWindowManager {
   private widget: BrowserWindow | null = null;
   private workspace: BrowserWindow | null = null;
   private tray: Tray | null = null;
+  private widgetAnchor: WidgetAnchor | null = null;
+  private widgetDragOrigin: WidgetDragOrigin | null = null;
 
   constructor(
     private readonly settings: SettingsApplicationService,
@@ -21,10 +26,12 @@ export class ElectronWindowManager {
 
   async start(): Promise<void> {
     const settings = await this.settings.read();
+    const collapsedBounds = resolveWidgetBounds("collapsed", 0);
     this.configureDevelopmentDockIcon();
-    this.widget = this.createWindow({ width: 380, height: 88, transparent: true, backgroundColor: "#00000000", frame: false, resizable: false, skipTaskbar: true, alwaysOnTop: true });
+    this.widget = this.createWindow({ width: collapsedBounds.width, height: collapsedBounds.height, transparent: true, backgroundColor: "#00000000", frame: false, resizable: false, skipTaskbar: true, alwaysOnTop: true });
     this.widget.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     this.widget.setAlwaysOnTop(true, "floating");
+    this.widget.on("blur", () => this.widget?.webContents.send("synapse:widget-blur"));
     this.placeWidget(settings.widgetPositions, settings.widgetDisplayId);
     await this.load(this.widget, "widget");
     if (settings.widgetVisible) this.widget.showInactive();
@@ -66,7 +73,36 @@ export class ElectronWindowManager {
     for (const window of [this.widget, this.workspace]) if (window && !window.isDestroyed()) window.webContents.send("synapse:sessions-changed");
   }
 
-  resizeWidget(expanded: boolean): void { this.widget?.setSize(380, expanded ? 390 : 88, true); }
+  resizeWidget(size: WidgetBounds): void {
+    if (!this.widget) return;
+    const current = this.widget.getBounds();
+    const displays = screen.getAllDisplays();
+    const display = displays.find((candidate) => String(candidate.id) === this.widgetAnchor?.displayId) ?? screen.getDisplayMatching(current);
+    const anchor = this.widgetAnchor ?? { displayId: String(display.id), right: current.x + current.width, y: current.y };
+    this.widget.setBounds(resolveAnchoredWidgetBounds(display.workArea, anchor, size), true);
+  }
+
+  beginWidgetDrag(pointer: { x: number; y: number }): void {
+    if (!this.widget || this.widget.getBounds().width !== WIDGET_COLLAPSED_SIZE) return;
+    const [windowX = 0, windowY = 0] = this.widget.getPosition();
+    this.widgetDragOrigin = { pointerX: pointer.x, pointerY: pointer.y, windowX, windowY };
+  }
+
+  moveWidgetDrag(pointer: { x: number; y: number }): void {
+    if (!this.widget || !this.widgetDragOrigin) return;
+    const display = screen.getDisplayNearestPoint({ x: Math.round(pointer.x), y: Math.round(pointer.y) });
+    const size = this.widget.getBounds();
+    const desiredX = Math.round(this.widgetDragOrigin.windowX + pointer.x - this.widgetDragOrigin.pointerX);
+    const desiredY = Math.round(this.widgetDragOrigin.windowY + pointer.y - this.widgetDragOrigin.pointerY);
+    const maxX = Math.max(display.workArea.x, display.workArea.x + display.workArea.width - size.width);
+    const maxY = Math.max(display.workArea.y, display.workArea.y + display.workArea.height - size.height);
+    const x = Math.min(maxX, Math.max(display.workArea.x, desiredX));
+    const y = Math.min(maxY, Math.max(display.workArea.y, desiredY));
+    this.widgetAnchor = { displayId: String(display.id), right: x + size.width, y };
+    this.widget.setPosition(x, y);
+  }
+
+  endWidgetDrag(): void { this.widgetDragOrigin = null; }
 
   private createWindow(options: Electron.BrowserWindowConstructorOptions): BrowserWindow {
     const window = new BrowserWindow({
@@ -99,16 +135,20 @@ export class ElectronWindowManager {
   private placeWidget(positions: Readonly<Record<string, { x: number; y: number }>>, displayId: string | null): void {
     if (!this.widget) return;
     const primary = screen.getPrimaryDisplay();
-    const placement = resolveWidgetPlacement(screen.getAllDisplays(), primary.id, displayId, positions, this.widget.getBounds());
+    const displays = screen.getAllDisplays();
+    const placement = resolveWidgetPlacement(displays, primary.id, displayId, positions, this.widget.getBounds());
     let currentPositions = { ...positions };
+    this.widgetAnchor = { displayId: placement.displayId, right: placement.x + this.widget.getBounds().width, y: placement.y };
     this.widget.setPosition(placement.x, placement.y);
     let timer: NodeJS.Timeout | null = null;
     this.widget.on("move", () => {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
-        const [x = 0, y = 0] = this.widget!.getPosition();
-        const currentDisplay = screen.getDisplayMatching(this.widget!.getBounds());
-        currentPositions = { ...currentPositions, [String(currentDisplay.id)]: { x, y } };
+        const bounds = this.widget!.getBounds();
+        if (bounds.width !== WIDGET_COLLAPSED_SIZE) return;
+        const currentDisplay = screen.getDisplayMatching(bounds);
+        this.widgetAnchor = { displayId: String(currentDisplay.id), right: bounds.x + bounds.width, y: bounds.y };
+        currentPositions = { ...currentPositions, [String(currentDisplay.id)]: { x: bounds.x, y: bounds.y } };
         void this.settings.update({ widgetPositions: currentPositions, widgetDisplayId: String(currentDisplay.id) });
       }, 300);
     });
