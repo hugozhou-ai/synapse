@@ -74,7 +74,7 @@ export function SummaryComposer({ sessionId, onClose }: { sessionId: string; onC
         <div className="source-count"><strong>{selected.size}</strong><span>个 turns 将作为事实来源</span></div>
         <button className="primary wide" disabled={busy || !conversation || selected.size === 0 || !profileId || (syncNotes && !notesFolder.trim())} onClick={generate}>{draft.state.phase === "generating" ? <LoaderCircle className="spin" size={17} /> : <Sparkles size={17} />}生成草稿</button>
       </aside>
-    </div> : <DraftWorkspace state={draft.state} busy={busy || !settings} finalized={finalized} onEdit={draft.edit} onPreview={draft.setPreview} onSave={() => void draft.save()} onFinalize={() => void draft.finalize(syncNotes)} />}
+    </div> : <DraftWorkspace state={draft.state} busy={busy} finalized={finalized} onEdit={draft.edit} onPreview={draft.setPreview} onSave={() => void draft.save()} onFinalize={() => void draft.finalize(syncNotes)} />}
   </div>;
 }
 

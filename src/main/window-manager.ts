@@ -58,6 +58,8 @@ export class ElectronWindowManager {
 
   async openSummaryResult(documentId: string): Promise<void> { await this.openWorkspace(`history/${documentId}`); }
 
+  async openSummary(sessionId: string): Promise<void> { await this.openWorkspace(`summary/${sessionId}`); }
+
   private async openWorkspace(route: WorkspaceRoute): Promise<void> {
     if (!this.workspace || this.workspace.isDestroyed()) {
       this.workspace = this.createWindow({ width: 1180, height: 760, minWidth: 900, minHeight: 620, titleBarStyle: "hiddenInset", backgroundColor: "#fafaf7" });

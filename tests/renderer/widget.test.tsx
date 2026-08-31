@@ -8,27 +8,21 @@ import { Widget } from "../../src/renderer/src/features/widget/Widget";
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); });
 
 describe("Widget summary actions", () => {
-  it("generates in the background, shows loading in place, then exposes a result link", async () => {
-    let session: WidgetSessionView = {
+  it("opens manual summary composition and keeps the existing result link", async () => {
+    const session: WidgetSessionView = {
       id: "session", threadId: "thread", title: "Task", cwd: "/repo", status: "ready",
-      promptPreview: "prompt", elapsedSeconds: 10, lastCompletedTurnId: "turn", summaryDocumentId: null,
+      promptPreview: "prompt", elapsedSeconds: 10, lastCompletedTurnId: "turn", summaryDocumentId: "document",
     };
-    let resolveGeneration!: () => void;
-    const generation = new Promise<void>((resolve) => { resolveGeneration = resolve; });
-    const generateDefault = vi.fn(async () => {
-      await generation;
-      session = { ...session, summaryDocumentId: "document" };
-      return { documentId: "document", versionId: "version", content: { title: "Summary", abstract: "", bodyMarkdown: "Body", tags: [] } };
-    });
+    const openSummary = vi.fn();
     const openSummaryResult = vi.fn();
     const resizeWidget = vi.fn();
     let widgetBlur: () => void = () => undefined;
     Object.defineProperty(window, "synapse", { configurable: true, value: {
       sessions: { listWidgetQueue: vi.fn(async () => [session]), ignore: vi.fn(), turns: vi.fn() },
-      summaries: { generateDefault },
+      summaries: {},
       hooks: { inspect: vi.fn().mockResolvedValue({ installed: true, trusted: true, onboardingRequired: false, relayPath: "/relay", configPath: "/hooks", message: null, trustStates: [] }) },
       window: {
-        resizeWidget, openSettings: vi.fn(), openHistory: vi.fn(), openSummaryResult,
+        resizeWidget, openSettings: vi.fn(), openHistory: vi.fn(), openSummary, openSummaryResult,
         beginWidgetDrag: vi.fn(), moveWidgetDrag: vi.fn(), endWidgetDrag: vi.fn(),
         onWidgetBlur: vi.fn((listener: () => void) => { widgetBlur = listener; return () => undefined; }),
         onSessionsChanged: vi.fn(() => () => undefined), onNavigate: vi.fn(() => () => undefined),
@@ -41,12 +35,7 @@ describe("Widget summary actions", () => {
     await user.click(screen.getByRole("button", { name: "展开悬浮窗" }));
     await waitFor(() => expect(resizeWidget).toHaveBeenCalledWith({ width: 304, height: 205 }));
     await user.click(await screen.findByRole("button", { name: "总结" }));
-
-    expect(generateDefault).toHaveBeenCalledWith("session");
-    expect((screen.getByRole("button", { name: "正在总结" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(openSummaryResult).not.toHaveBeenCalled();
-
-    await act(async () => { resolveGeneration(); await generation; });
+    expect(openSummary).toHaveBeenCalledWith("session");
     const resultLink = await screen.findByRole("button", { name: "打开整理结果" });
     await user.click(resultLink);
     await waitFor(() => expect(openSummaryResult).toHaveBeenCalledWith("document"));
@@ -70,10 +59,10 @@ describe("Widget summary actions", () => {
     const resizeWidget = vi.fn();
     Object.defineProperty(window, "synapse", { configurable: true, value: {
       sessions: { listWidgetQueue: vi.fn(async () => sessions), ignore: vi.fn(), turns: vi.fn() },
-      summaries: { generateDefault: vi.fn() },
+      summaries: {},
       hooks: { inspect: vi.fn().mockResolvedValue({ installed: true, trusted: true, onboardingRequired: false, relayPath: "/relay", configPath: "/hooks", message: null, trustStates: [] }) },
       window: {
-        resizeWidget, openSettings: vi.fn(), openHistory: vi.fn(), openSummaryResult: vi.fn(),
+        resizeWidget, openSettings: vi.fn(), openHistory: vi.fn(), openSummary: vi.fn(), openSummaryResult: vi.fn(),
         beginWidgetDrag: vi.fn(), moveWidgetDrag: vi.fn(), endWidgetDrag: vi.fn(), onWidgetBlur: vi.fn(() => () => undefined),
         onSessionsChanged: vi.fn((listener: () => void) => { sessionsChanged = listener; return () => undefined; }),
         onNavigate: vi.fn(() => () => undefined),
@@ -101,10 +90,10 @@ describe("Widget summary actions", () => {
     const endWidgetDrag = vi.fn();
     Object.defineProperty(window, "synapse", { configurable: true, value: {
       sessions: { listWidgetQueue: vi.fn(async () => []), ignore: vi.fn(), turns: vi.fn() },
-      summaries: { generateDefault: vi.fn() },
+      summaries: {},
       hooks: { inspect: vi.fn().mockResolvedValue({ installed: true, trusted: true, onboardingRequired: false, relayPath: "/relay", configPath: "/hooks", message: null, trustStates: [] }) },
       window: {
-        resizeWidget: vi.fn(), openSettings: vi.fn(), openHistory: vi.fn(), openSummaryResult: vi.fn(),
+        resizeWidget: vi.fn(), openSettings: vi.fn(), openHistory: vi.fn(), openSummary: vi.fn(), openSummaryResult: vi.fn(),
         beginWidgetDrag, moveWidgetDrag, endWidgetDrag, onWidgetBlur: vi.fn(() => () => undefined),
         onSessionsChanged: vi.fn(() => () => undefined), onNavigate: vi.fn(() => () => undefined),
       },

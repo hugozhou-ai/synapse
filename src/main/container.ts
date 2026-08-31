@@ -4,7 +4,7 @@ import type { App } from "electron";
 import { CodexHookManagementService, type HookManagementService } from "@application/hook-management";
 import { PersistentSettingsApplicationService, RepositoryProfileApplicationService, RepositorySessionQueryService, RepositorySummaryQueryService, SystemExportApplicationService, type ExportApplicationService, type ProfileApplicationService, type SessionQueryService, type SettingsApplicationService, type SummaryQueryService } from "@application/query-services";
 import { HookBasedSessionAwarenessService, type SessionAwarenessService } from "@application/session-services";
-import { DefaultProfileSessionSummaryService, OutboxSummaryPublicationService, ProfileDrivenSummaryGenerationService, TransactionalSummaryDeletionService, VersionedSummaryFinalizationService, type DefaultSessionSummaryService, type SummaryDeletionService, type SummaryFinalizationService, type SummaryGenerationService, type SummaryPublicationService } from "@application/summary-services";
+import { OutboxSummaryPublicationService, ProfileDrivenSummaryGenerationService, TransactionalSummaryDeletionService, VersionedSummaryFinalizationService, type SummaryDeletionService, type SummaryFinalizationService, type SummaryGenerationService, type SummaryPublicationService } from "@application/summary-services";
 import { ArbitraryTurnSelectionService, DefaultSessionLifecycleService, NormalizedTurnSummaryContextService } from "@domain/services";
 import { LazyCodexAppServerRuntime } from "@infrastructure/app-server/runtime";
 import { ElectronExportGateway } from "@infrastructure/electron/export-gateway";
@@ -27,7 +27,6 @@ export class ElectronApplicationContainer {
   readonly sessionQueries!: SessionQueryService;
   readonly summaryQueries!: SummaryQueryService;
   readonly summaryGeneration!: SummaryGenerationService;
-  readonly defaultSessionSummary!: DefaultSessionSummaryService;
   readonly summaryDeletion!: SummaryDeletionService;
   readonly summaryFinalization!: SummaryFinalizationService;
   readonly summaryPublication!: SummaryPublicationService;
@@ -73,7 +72,6 @@ export class ElectronApplicationContainer {
       new ArbitraryTurnSelectionService(), new NormalizedTurnSummaryContextService(new NodeContentHashService()),
       appServer, profiles, summaries, sessions, jobs, unitOfWork, clock, ids,
     );
-    const defaultSessionSummary = new DefaultProfileSessionSummaryService(summaryGeneration, sessions, profiles, settingsRepository, summaries);
     const finalization = new VersionedSummaryFinalizationService(summaries, sessions, outbox, unitOfWork, clock, ids);
     const notesScript = resourcePath(app, "apple-notes-publisher.jxa");
     const notes = new AppleNotesSummaryPublisher(notesScript, logger);
@@ -95,7 +93,6 @@ export class ElectronApplicationContainer {
       sessionQueries: new RepositorySessionQueryService(sessions, clock, summaries),
       summaryQueries: new RepositorySummaryQueryService(summaries),
       summaryGeneration,
-      defaultSessionSummary,
       summaryDeletion: new TransactionalSummaryDeletionService(summaries, sessions, outbox, unitOfWork),
       summaryFinalization: finalization,
       summaryPublication: publication,

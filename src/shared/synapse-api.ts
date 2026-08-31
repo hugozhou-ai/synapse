@@ -10,7 +10,6 @@ export interface SynapseApi {
   };
   summaries: {
     generate(command: GenerateSummaryCommand): Promise<SummaryDraft>;
-    generateDefault(sessionId: string): Promise<SummaryDraft>;
     regenerate(command: RegenerateSummaryCommand): Promise<SummaryDraft>;
     updateDraft(command: UpdateDraftCommand): Promise<SummaryDraft>;
     finalize(command: FinalizeSummaryCommand): Promise<FinalizedSummaryView>;
@@ -50,6 +49,7 @@ export interface SynapseApi {
     openHistory(): Promise<void>;
     openQueue(): Promise<void>;
     openSettings(): Promise<void>;
+    openSummary(sessionId: string): Promise<void>;
     openSummaryResult(documentId: string): Promise<void>;
     resizeWidget(bounds: WidgetBounds): Promise<void>;
     beginWidgetDrag(pointer: { x: number; y: number }): Promise<void>;

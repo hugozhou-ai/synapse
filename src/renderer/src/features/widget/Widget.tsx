@@ -6,7 +6,7 @@ import { EmptyState } from "../../components/common";
 import { SynapseLogo } from "../../components/SynapseLogo";
 import { useHookInstallation } from "../../hooks/use-hook-installation";
 import { useSessionQueue } from "../../hooks/use-session-queue";
-import { formatDuration, messageOf, shortPath } from "../../lib/format";
+import { formatDuration, shortPath } from "../../lib/format";
 import { findLatestSessionStatusChange, snapshotSessionStatuses, type SessionStatusSnapshot } from "./widget-activity";
 
 const ACTIVITY_VISIBLE_MS = 3_000;
@@ -14,13 +14,10 @@ const LOGO_DRAG_THRESHOLD = 4;
 interface LogoDragState { readonly pointerId: number; readonly startX: number; readonly startY: number; moved: boolean; }
 
 export function Widget() {
-  const { sessions, loaded, reload } = useSessionQueue();
+  const { sessions, loaded } = useSessionQueue();
   const { status: hooks } = useHookInstallation();
   const [mode, setMode] = useState<WidgetMode>("collapsed");
   const [activitySessionId, setActivitySessionId] = useState<string | null>(null);
-  const [summarizing, setSummarizing] = useState<ReadonlySet<string>>(new Set());
-  const [summaryErrors, setSummaryErrors] = useState<Readonly<Record<string, string>>>({});
-  const requests = useRef(new Set<string>());
   const previousStatuses = useRef<SessionStatusSnapshot | null>(null);
   const activityTimer = useRef<number | null>(null);
   const logoDrag = useRef<LogoDragState | null>(null);
@@ -93,18 +90,6 @@ export function Widget() {
     if (typeof event.currentTarget.releasePointerCapture === "function" && (typeof event.currentTarget.hasPointerCapture !== "function" || event.currentTarget.hasPointerCapture(event.pointerId))) event.currentTarget.releasePointerCapture(event.pointerId);
     void window.synapse.window.endWidgetDrag();
   };
-  const summarize = async (sessionId: string) => {
-    if (requests.current.has(sessionId)) return;
-    requests.current.add(sessionId);
-    setSummarizing((current) => new Set(current).add(sessionId));
-    setSummaryErrors((current) => { const next = { ...current }; delete next[sessionId]; return next; });
-    try { await window.synapse.summaries.generateDefault(sessionId); reload(); }
-    catch (error) { setSummaryErrors((current) => ({ ...current, [sessionId]: messageOf(error) })); }
-    finally {
-      requests.current.delete(sessionId);
-      setSummarizing((current) => { const next = new Set(current); next.delete(sessionId); return next; });
-    }
-  };
   return <main className={`widget-shell ${mode}`}>
     <div className="widget-top drag-region">
       <button className="synapse-mark no-drag" aria-label={mode === "expanded" ? "收起悬浮窗" : "展开悬浮窗"} onClick={toggleFromLogo} onPointerDown={beginLogoDrag} onPointerMove={moveLogoDrag} onPointerUp={endLogoDrag} onPointerCancel={endLogoDrag}><SynapseLogo decorative /></button>
@@ -117,21 +102,21 @@ export function Widget() {
         <button className="icon-button" onClick={collapse} aria-label="收起"><ChevronUp size={16} /></button>
       </div>}
     </div>
-    {mode === "activity" && activitySession && <div className="widget-body no-drag"><SessionMiniCard session={activitySession} summarizing={summarizing.has(activitySession.id)} error={summaryErrors[activitySession.id] ?? null} onSummarize={summarize} /></div>}
+    {mode === "activity" && activitySession && <div className="widget-body no-drag"><SessionMiniCard session={activitySession} /></div>}
     {mode === "expanded" && <div className="widget-body no-drag">
-      {sessions.slice(0, 3).map((session) => <SessionMiniCard key={session.id} session={session} summarizing={summarizing.has(session.id)} error={summaryErrors[session.id] ?? null} onSummarize={summarize} />)}
+      {sessions.slice(0, 3).map((session) => <SessionMiniCard key={session.id} session={session} />)}
       {sessions.length === 0 && <EmptyState compact><span>{hooks === null ? "正在检测 Codex Hook 状态" : hooksReady ? "等待新的 Codex 任务" : "需要先安装并信任 Codex Hook"}</span>{hooks !== null && !hooksReady && <button className="secondary tiny" onClick={() => window.synapse.window.openSettings()}>检查 Hook 设置</button>}</EmptyState>}
       <button className="widget-history" onClick={() => window.synapse.window.openHistory()}><BookOpen size={14} /> 打开历史</button>
     </div>}
   </main>;
 }
 
-function SessionMiniCard({ session, summarizing, error, onSummarize }: { session: WidgetSessionView; summarizing: boolean; error: string | null; onSummarize(id: string): Promise<void> }) {
+function SessionMiniCard({ session }: { session: WidgetSessionView }) {
   return <article className="mini-card">
     <div className={`status-orb ${session.status}`}>{session.status === "running" ? <LoaderCircle size={14} /> : <Check size={14} />}</div>
     <div className="mini-main"><strong>{session.title}</strong><span>{shortPath(session.cwd)} · {formatDuration(session.elapsedSeconds)}</span></div>
     {session.status === "ready" && <div className="mini-actions">
-      <button className={`primary tiny mini-summary ${error ? "failed" : ""}`} disabled={summarizing} aria-label={summarizing ? "正在总结" : "总结"} title={error ?? undefined} onClick={() => void onSummarize(session.id)}>{summarizing ? <LoaderCircle className="spin" size={14} /> : "总结"}</button>
+      <button className="primary tiny mini-summary" aria-label="总结" onClick={() => window.synapse.window.openSummary(session.id)}>总结</button>
       {session.summaryDocumentId && <button className="mini-result-link" aria-label="打开整理结果" title="打开整理结果" onClick={() => window.synapse.window.openSummaryResult(session.summaryDocumentId!)}><ArrowUpRight size={15} /></button>}
     </div>}
   </article>;

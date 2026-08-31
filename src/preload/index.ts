@@ -15,7 +15,7 @@ const api: SynapseApi = {
     listWidgetQueue: () => invoke("sessions:list"), turns: (id) => invoke("sessions:turns", id), ignore: (id) => invoke("sessions:ignore", id),
   },
   summaries: {
-    generate: (command) => invoke("summaries:generate", command), generateDefault: (id) => invoke("summaries:generate-default", id), regenerate: (command) => invoke("summaries:regenerate", command), updateDraft: (command) => invoke("summaries:update", command),
+    generate: (command) => invoke("summaries:generate", command), regenerate: (command) => invoke("summaries:regenerate", command), updateDraft: (command) => invoke("summaries:update", command),
     finalize: (command) => invoke("summaries:finalize", command), search: (query) => invoke("summaries:search", query),
     get: (id) => invoke("summaries:get", id), delete: (id) => invoke("summaries:delete", id), retryNotes: (id) => invoke("summaries:retry-notes", id),
   },
@@ -29,7 +29,7 @@ const api: SynapseApi = {
   diagnostics: { reportRendererError: (report) => invoke("diagnostics:renderer-error", report) },
   window: {
     openHistory: () => invoke("window:history"), openQueue: () => invoke("window:queue"), openSettings: () => invoke("window:settings"),
-    openSummaryResult: (id) => invoke("window:summary-result", id), resizeWidget: (bounds) => invoke("window:resize-widget", bounds),
+    openSummary: (id) => invoke("window:summary", id), openSummaryResult: (id) => invoke("window:summary-result", id), resizeWidget: (bounds) => invoke("window:resize-widget", bounds),
     beginWidgetDrag: (pointer) => invoke("window:widget-drag-start", pointer), moveWidgetDrag: (pointer) => invoke("window:widget-drag-move", pointer), endWidgetDrag: () => invoke("window:widget-drag-end"),
     dismissWidget: () => invoke("window:widget-dismiss"),
     onWidgetBlur: (listener) => { const handler = () => listener(); ipcRenderer.on("synapse:widget-blur", handler); return () => ipcRenderer.removeListener("synapse:widget-blur", handler); },

@@ -1,10 +1,10 @@
 import type { SummaryContextService } from "@domain/services";
 import type { CodexConversation } from "@domain/conversation";
 import type { CodexSessionAggregate } from "@domain/session";
-import { PublicationTarget, SourceRevision, SummaryDocumentAggregate, SummaryVersion } from "@domain/summary";
+import { SourceRevision, SummaryDocumentAggregate, SummaryVersion } from "@domain/summary";
 import { DomainError } from "@domain/shared";
 import type {
-  Clock, CodexSessionRepository, IdGenerator, OutboxRepository, PublicationRepository, SettingsRepository,
+  Clock, CodexSessionRepository, IdGenerator, OutboxRepository, PublicationRepository,
   SummaryAgentGateway, SummaryDocumentRepository, SummaryJobRepository, SummaryProfileRepository,
   SummaryPublisher, TurnSelectionValidator, UnitOfWork,
 } from "./ports";
@@ -16,10 +16,6 @@ export interface SummaryGenerationService {
   generateDraft(command: GenerateSummaryCommand): Promise<SummaryDraft>;
   regenerate(command: RegenerateSummaryCommand): Promise<SummaryDraft>;
   cancel(jobId: string): Promise<void>;
-}
-
-export interface DefaultSessionSummaryService {
-  generate(sessionId: string): Promise<SummaryDraft>;
 }
 
 export interface SummaryDeletionService {
@@ -48,56 +44,6 @@ export class TransactionalSummaryDeletionService implements SummaryDeletionServi
       }
     });
   }
-}
-
-export class DefaultProfileSessionSummaryService implements DefaultSessionSummaryService {
-  private readonly inFlight = new Map<string, Promise<SummaryDraft>>();
-
-  constructor(
-    private readonly generation: SummaryGenerationService,
-    private readonly sessions: CodexSessionRepository,
-    private readonly profiles: SummaryProfileRepository,
-    private readonly settings: SettingsRepository,
-    private readonly summaries: SummaryDocumentRepository,
-  ) {}
-
-  generate(sessionId: string): Promise<SummaryDraft> {
-    const running = this.inFlight.get(sessionId);
-    if (running) return running;
-    const generation = this.generateOnce(sessionId).finally(() => { this.inFlight.delete(sessionId); });
-    this.inFlight.set(sessionId, generation);
-    return generation;
-  }
-
-  private async generateOnce(sessionId: string): Promise<SummaryDraft> {
-    const session = await this.sessions.findById(sessionId);
-    if (!session) throw new DomainError("SESSION_NOT_FOUND", "Session does not exist.");
-    const selectedTurnIds = session.turns.filter((turn) => turn.status !== "running").map((turn) => turn.id);
-    if (selectedTurnIds.length === 0) throw new DomainError("SESSION_NOT_READY", "Session has no completed turns to summarize.");
-    const profile = (await this.profiles.list()).find((candidate) => candidate.isDefault);
-    if (!profile) throw new DomainError("DEFAULT_PROFILE_NOT_FOUND", "A default summary profile is required.");
-    const settings = await this.settings.read();
-    const publicationTarget = settings.syncNotesByDefault ? new PublicationTarget(settings.notesAccount, settings.notesFolder) : null;
-    const existing = await this.summaries.findLatestBySessionId(sessionId);
-    const current = existing?.currentVersion;
-    if (existing && current && !current.isFinal && existing.snapshot.profileId === profile.id
-      && sameTurns(existing.snapshot.selection.turnIds, selectedTurnIds)
-      && sameTarget(existing.snapshot.publicationTarget, publicationTarget)) {
-      return { documentId: existing.id, versionId: current.props.id, content: current.props.content };
-    }
-    return this.generation.generateDraft({
-      sessionId, selectedTurnIds, profileId: profile.id, model: settings.summaryModel,
-      syncToNotes: settings.syncNotesByDefault, publicationTarget,
-    });
-  }
-}
-
-function sameTurns(left: readonly string[], right: readonly string[]): boolean {
-  return left.length === right.length && left.every((turnId, index) => turnId === right[index]);
-}
-
-function sameTarget(left: PublicationTarget | null, right: PublicationTarget | null): boolean {
-  return left?.account === right?.account && left?.folder === right?.folder;
 }
 
 export class ProfileDrivenSummaryGenerationService implements SummaryGenerationService {

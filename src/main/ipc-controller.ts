@@ -36,10 +36,6 @@ export class ElectronIpcController {
       const result = await this.container.summaryGeneration.generateDraft({ ...value, publicationTarget: value.publicationTarget ? new PublicationTarget(value.publicationTarget.account, value.publicationTarget.folder) : null });
       this.windows.broadcastSessionsChanged(); return result;
     });
-    this.handle("summaries:generate-default", idSchema, async (id) => {
-      const result = await this.container.defaultSessionSummary.generate(id);
-      this.windows.broadcastSessionsChanged(); return result;
-    });
     this.handle("summaries:regenerate", regenerateSchema, (value) => this.container.summaryGeneration.regenerate(value));
     this.handle("summaries:update", z.object({ documentId: idSchema, content: summaryContentSchema }), (value) => this.container.summaryFinalization.updateDraft(value));
     this.handle("summaries:finalize", z.object({ documentId: idSchema, content: summaryContentSchema, syncToNotes: z.boolean() }), async (value) => {
@@ -71,6 +67,7 @@ export class ElectronIpcController {
     this.handle("window:history", z.unknown(), () => this.windows.openHistory());
     this.handle("window:queue", z.unknown(), () => this.windows.openQueue());
     this.handle("window:settings", z.unknown(), () => this.windows.openSettings());
+    this.handle("window:summary", idSchema, (id) => this.windows.openSummary(id));
     this.handle("window:summary-result", idSchema, (id) => this.windows.openSummaryResult(id));
     this.handle("window:resize-widget", z.object({
       width: z.union([z.literal(WIDGET_COLLAPSED_SIZE), z.literal(WIDGET_EXPANDED_WIDTH)]),
