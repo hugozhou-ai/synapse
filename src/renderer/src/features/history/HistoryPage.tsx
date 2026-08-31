@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import { Database, FileDown, NotebookPen, RefreshCw, Search } from "lucide-react";
 import type { SummarySearchItem } from "@application/ports";
 import type { SummaryDetailView, SummaryProfileView } from "@application/contracts";
+import { DatePicker } from "../../components/DatePicker";
 import { EmptyState, ErrorBanner, PageHeader } from "../../components/common";
 import { Select } from "../../components/Select";
 import { messageOf, shortPath } from "../../lib/format";
@@ -39,11 +40,11 @@ export function HistoryPage() {
     {error && <ErrorBanner message={error} />}
     <div className="search-box"><Search size={17} /><input aria-label="搜索总结" placeholder="搜索总结、标签或项目路径…" value={query} onChange={(event) => setQuery(event.target.value)} /></div>
     <div className="filter-bar">
-      <Select ariaLabel="项目" value={filters.cwd} onChange={(cwd) => setFilters({ ...filters, cwd })} options={[{ value: "", label: "所有项目" }, ...projects.map((project) => ({ value: project, label: shortPath(project) }))]} />
-      <Select ariaLabel="整理方案" value={filters.profileId} onChange={(profileId) => setFilters({ ...filters, profileId })} options={[{ value: "", label: "所有方案" }, ...profiles.map((profile) => ({ value: profile.id, label: profile.name }))]} />
-      <Select ariaLabel="版本状态" value={filters.status} onChange={(status) => setFilters({ ...filters, status })} options={[{ value: "", label: "所有状态" }, { value: "final", label: "Final" }, { value: "agent-draft", label: "Agent draft" }, { value: "edited-draft", label: "Edited draft" }]} />
-      <label className="compact-filter">开始日期<input type="date" value={filters.from} onChange={(event) => setFilters({ ...filters, from: event.target.value })} /></label>
-      <label className="compact-filter">结束日期<input type="date" value={filters.to} onChange={(event) => setFilters({ ...filters, to: event.target.value })} /></label>
+      <div className="compact-filter"><span>项目</span><Select ariaLabel="项目" value={filters.cwd} onChange={(cwd) => setFilters({ ...filters, cwd })} options={[{ value: "", label: "所有项目" }, ...projects.map((project) => ({ value: project, label: shortPath(project) }))]} /></div>
+      <div className="compact-filter"><span>整理方案</span><Select ariaLabel="整理方案" value={filters.profileId} onChange={(profileId) => setFilters({ ...filters, profileId })} options={[{ value: "", label: "所有方案" }, ...profiles.map((profile) => ({ value: profile.id, label: profile.name }))]} /></div>
+      <div className="compact-filter"><span>版本状态</span><Select ariaLabel="版本状态" value={filters.status} onChange={(status) => setFilters({ ...filters, status })} options={[{ value: "", label: "所有状态" }, { value: "final", label: "Final" }, { value: "agent-draft", label: "Agent draft" }, { value: "edited-draft", label: "Edited draft" }]} /></div>
+      <div className="compact-filter"><span>开始日期</span><DatePicker ariaLabel="开始日期" value={filters.from} onChange={(from) => setFilters({ ...filters, from })} /></div>
+      <div className="compact-filter"><span>结束日期</span><DatePicker ariaLabel="结束日期" value={filters.to} onChange={(to) => setFilters({ ...filters, to })} /></div>
     </div>
     <div className="history-layout"><div className="history-list">{items.map((item) => <button className={`history-card ${selected?.id === item.documentId ? "active" : ""}`} key={item.documentId} onClick={() => open(item.documentId)}><span>{item.versionKind}</span><h3>{item.title}</h3><p>{item.abstract}</p><div>{item.tags.slice(0, 3).map((tag) => <em key={tag}>{tag}</em>)}<time>{new Date(item.updatedAt).toLocaleDateString()}</time></div></button>)}{items.length === 0 && <EmptyState><Search size={24} />没有匹配的总结</EmptyState>}</div>
       <div className="history-detail">{selected?.currentVersion ? <HistoryDetail detail={selected} onChanged={() => open(selected.id)} onError={setError} /> : <EmptyState>选择一条总结查看详情</EmptyState>}</div>

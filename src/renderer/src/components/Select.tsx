@@ -95,7 +95,8 @@ export function Select({ value, options, onChange, ariaLabel, disabled = false }
       }}
       onKeyDown={handleKeyDown}
     >
-      <span>{selected?.label ?? (value || "—")}</span><ChevronDown className="select-chevron" size={14} />
+      <span className="select-value">{selected?.label ?? (value || "—")}</span>
+      <span className="select-indicator"><ChevronDown className="select-chevron" size={14} /></span>
     </button>
     {open && <div className="select-menu" id={`${id}-listbox`} role="listbox" aria-label={ariaLabel}>
       {options.map((option, index) => <button
