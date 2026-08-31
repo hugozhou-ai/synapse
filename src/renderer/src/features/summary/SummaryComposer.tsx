@@ -72,7 +72,7 @@ export function SummaryComposer({ sessionId, onClose }: { sessionId: string; onC
         <label className="toggle-row"><input type="checkbox" checked={syncNotes} onChange={(event) => setSyncNotes(event.target.checked)} /><span className="toggle" /><div><strong>同步到 Apple Notes</strong><small>{notesFolder || "未选择文件夹"} · 仅 final 后执行</small></div></label>
         {syncNotes && <NotesTargetPicker targets={notesTargets} account={notesAccount} folder={notesFolder} onAccountChange={setNotesAccount} onFolderChange={setNotesFolder} />}
         <div className="source-count"><strong>{selected.size}</strong><span>个 turns 将作为事实来源</span></div>
-        <button className="primary wide" disabled={busy || !conversation || selected.size === 0 || !profileId || (syncNotes && !notesFolder.trim())} onClick={generate}>{draft.state.phase === "generating" ? <LoaderCircle className="spin" size={17} /> : <Sparkles size={17} />}生成草稿</button>
+        <button className="primary wide" disabled={busy || !conversation || selected.size === 0 || !profileId || (syncNotes && !notesFolder.trim())} onClick={generate}>{draft.state.phase === "generating" ? <LoaderCircle className="spin" size={17} /> : <Sparkles size={17} />}总结</button>
       </aside>
     </div> : <DraftWorkspace state={draft.state} busy={busy} finalized={finalized} onEdit={draft.edit} onPreview={draft.setPreview} onSave={() => void draft.save()} onFinalize={() => void draft.finalize(syncNotes)} />}
   </div>;
