@@ -21,6 +21,7 @@ export class ElectronWindowManager {
 
   async start(): Promise<void> {
     const settings = await this.settings.read();
+    this.configureDevelopmentDockIcon();
     this.widget = this.createWindow({ width: 380, height: 88, transparent: true, backgroundColor: "#00000000", frame: false, resizable: false, skipTaskbar: true, alwaysOnTop: true });
     this.widget.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     this.widget.setAlwaysOnTop(true, "floating");
@@ -114,7 +115,13 @@ export class ElectronWindowManager {
   }
 
   private createTray(): void {
-    const image = nativeImage.createFromNamedImage("NSActionTemplate").resize({ width: 16, height: 16 });
+    const trayIconPath = app.isPackaged
+      ? join(process.resourcesPath, "resources", "SynapseStatusTemplate.png")
+      : join(app.getAppPath(), "resources", "SynapseStatusTemplate.png");
+    const image = nativeImage.createFromPath(trayIconPath);
+    const retinaImage = nativeImage.createFromPath(trayIconPath.replace(/\.png$/, "@2x.png"));
+    if (image.isEmpty() || retinaImage.isEmpty()) throw new Error(`Unable to load status bar icon at ${trayIconPath}.`);
+    image.addRepresentation({ scaleFactor: 2, dataURL: retinaImage.toDataURL() });
     image.setTemplateImage(true);
     this.tray = new Tray(image);
     this.tray.setToolTip("Synapse");
@@ -130,5 +137,14 @@ export class ElectronWindowManager {
       if (visible) this.widget?.showInactive(); else this.widget?.hide();
       void this.settings.update({ widgetVisible: visible });
     });
+  }
+
+  private configureDevelopmentDockIcon(): void {
+    if (process.platform !== "darwin" || app.isPackaged) return;
+    if (!app.dock) throw new Error("Unable to configure the Dock icon because the Dock API is unavailable.");
+    const dockIconPath = join(app.getAppPath(), "build", "icon-master.png");
+    const image = nativeImage.createFromPath(dockIconPath);
+    if (image.isEmpty()) throw new Error(`Unable to load Dock icon at ${dockIconPath}.`);
+    app.dock.setIcon(image);
   }
 }
