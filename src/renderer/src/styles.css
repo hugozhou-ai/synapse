@@ -31,6 +31,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .widget-counters { display: flex; align-items: center; gap: 7px; }
 .counter { border-radius: 99px; padding: 6px 9px; font-size: 11px; color: #c7c7bf; background: rgba(255,255,255,.07); white-space: nowrap; }
 .counter.ready { color: #f3b28b; background: rgba(230,107,55,.14); }
+.counter.warning { border: 0; color: #ffd2b8; background: rgba(230,107,55,.2); cursor: pointer; }
 .live-dot { width: 7px; height: 7px; display: inline-block; flex: none; border-radius: 50%; background: #86a886; box-shadow: 0 0 0 4px rgba(134,168,134,.11); }
 .counter .live-dot { margin-right: 6px; }
 .icon-button { width: 30px; height: 30px; border: 0; border-radius: 9px; display: inline-grid; place-items: center; background: rgba(255,255,255,.08); color: inherit; cursor: pointer; }
@@ -47,6 +48,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .primary:hover { background: #d85f30; }
 .primary:disabled, .secondary:disabled { opacity: .5; cursor: default; }
 .primary.tiny { min-height: 29px; padding: 0 10px; font-size: 10px; border-radius: 8px; }
+.secondary.tiny { min-height: 29px; padding: 0 10px; font-size: 10px; border-radius: 8px; }
 .primary.wide { width: 100%; min-height: 43px; }
 .secondary { color: #4d4e48; border: 1px solid var(--line); background: var(--paper); box-shadow: 0 2px 4px rgba(0,0,0,.03); }
 .ghost { color: var(--muted); background: transparent; }
@@ -91,8 +93,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .meta { display: flex; gap: 18px; color: #96978e; font-size: 9px; }
 .meta span { display: inline-flex; align-items: center; gap: 5px; }
 .queue-actions { display: flex; align-items: center; gap: 3px; }
-.empty-state { min-height: 210px; padding: 30px; display: flex; align-items: center; justify-content: center; gap: 10px; border: 1px dashed #d4d1c8; border-radius: 15px; color: #92938b; font-size: 11px; text-align: center; }
-.empty-state.compact { min-height: 90px; border-color: rgba(255,255,255,.1); color: #8e9088; }
+.empty-state { min-height: 210px; padding: 30px; display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; border: 1px dashed #d4d1c8; border-radius: 15px; color: #92938b; font-size: 11px; text-align: center; }
+.empty-state.compact { min-height: 90px; flex-direction: column; border-color: rgba(255,255,255,.1); color: #8e9088; }
 
 .composer-grid { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 18px; align-items: start; }
 .panel { border: 1px solid var(--line); border-radius: 17px; background: rgba(250,249,245,.9); box-shadow: 0 6px 20px rgba(30,30,27,.035); }

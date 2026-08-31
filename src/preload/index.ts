@@ -24,7 +24,8 @@ const api: SynapseApi = {
   hooks: { inspect: () => invoke("hooks:inspect"), install: () => invoke("hooks:install"), uninstall: () => invoke("hooks:uninstall") },
   export: { markdown: (id) => invoke("export:markdown", id), json: (id) => invoke("export:json", id), revealDatabase: () => invoke("export:reveal-database") },
   window: {
-    openHistory: () => invoke("window:history"), openSummary: (id) => invoke("window:summary", id), resizeWidget: (expanded) => invoke("window:resize-widget", expanded),
+    openHistory: () => invoke("window:history"), openQueue: () => invoke("window:queue"), openSettings: () => invoke("window:settings"),
+    openSummary: (id) => invoke("window:summary", id), resizeWidget: (expanded) => invoke("window:resize-widget", expanded),
     onSessionsChanged: (listener) => { const handler = () => listener(); ipcRenderer.on("synapse:sessions-changed", handler); return () => ipcRenderer.removeListener("synapse:sessions-changed", handler); },
     onNavigate: (listener) => { const handler = (_event: Electron.IpcRendererEvent, path: string) => listener(path); ipcRenderer.on("synapse:navigate", handler); return () => ipcRenderer.removeListener("synapse:navigate", handler); },
   },

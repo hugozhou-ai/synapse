@@ -77,6 +77,8 @@ Hook 与 App Server 原始 DTO 分别通过 `CodexHookProtocolMapper`、`CodexPr
 
 `LazyCodexAppServerRuntime` 在 Hook receiver、SQLite 和窗口启动后于后台初始化。`CodexBinaryResolver` 按显式路径、Desktop 内置 binary、登录 shell 的 `codex` 查找候选；候选通过 `initialize`/`initialized`、`model/list`、`hooks/list` 与 `account/read` 握手后才被采用。App Server 不可用不会阻塞 Hook 感知，turn 查询通过显式同步状态告知 Renderer 当前是否使用 Hook cache。
 
+主进程日志同时写入控制台与权限为 `0600` 的 `~/Library/Application Support/Synapse/logs/synapse.log`。Hook 安装状态、receiver 生命周期和事件入库使用统一的 `[synapse:hook]` JSON 日志，便于区分“未安装、未信任、未收到、入库失败”四类问题。
+
 总结 thread 使用：
 
 - `ephemeral: true`

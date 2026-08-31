@@ -4,12 +4,11 @@ import { HistoryPage } from "../history/HistoryPage";
 import { QueuePage } from "../queue/QueuePage";
 import { SettingsPage } from "../settings/SettingsPage";
 import { SummaryComposer } from "../summary/SummaryComposer";
-
-type WorkspaceRoute = "history" | "queue" | "settings" | `summary/${string}`;
+import { parseWorkspaceRoute, type WorkspaceRoute } from "./workspace-route";
 
 export function Workspace() {
-  const [route, setRoute] = useState<WorkspaceRoute>("queue");
-  useEffect(() => window.synapse.window.onNavigate((path) => setRoute(path as WorkspaceRoute)), []);
+  const [route, setRoute] = useState<WorkspaceRoute>(() => parseWorkspaceRoute(location.hash));
+  useEffect(() => window.synapse.window.onNavigate((path) => setRoute(parseWorkspaceRoute(path))), []);
   const sessionId = route.startsWith("summary/") ? route.slice(8) : null;
   return <div className="workspace-shell">
     <aside className="sidebar">
@@ -22,7 +21,7 @@ export function Workspace() {
       <div className="sidebar-foot"><span className="live-dot" /> 本地运行 · 数据不离开设备</div>
     </aside>
     <section className="content-shell">
-      {sessionId ? <SummaryComposer sessionId={sessionId} onClose={() => setRoute("queue")} /> : route === "queue" ? <QueuePage onSummarize={(id) => setRoute(`summary/${id}`)} /> : route === "history" ? <HistoryPage /> : <SettingsPage />}
+      {sessionId ? <SummaryComposer sessionId={sessionId} onClose={() => setRoute("queue")} /> : route === "queue" ? <QueuePage onSummarize={(id) => setRoute(`summary/${id}`)} onOpenSettings={() => setRoute("settings")} /> : route === "history" ? <HistoryPage /> : <SettingsPage />}
     </section>
   </div>;
 }

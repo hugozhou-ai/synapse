@@ -53,6 +53,8 @@ export class ElectronIpcController {
     this.handle("export:json", idSchema, (id) => this.container.exports.json(id));
     this.handle("export:reveal-database", z.unknown(), () => this.container.exports.revealDatabaseDirectory());
     this.handle("window:history", z.unknown(), () => this.windows.openHistory());
+    this.handle("window:queue", z.unknown(), () => this.windows.openQueue());
+    this.handle("window:settings", z.unknown(), () => this.windows.openSettings());
     this.handle("window:summary", idSchema, (id) => this.windows.openSummary(id));
     this.handle("window:resize-widget", z.boolean(), (expanded) => { this.windows.resizeWidget(expanded); });
   }
@@ -63,7 +65,7 @@ export class ElectronIpcController {
       catch (error) {
         const code = error instanceof DomainError ? error.code : error instanceof z.ZodError ? "INVALID_INPUT" : "INTERNAL_ERROR";
         const message = error instanceof Error ? error.message : String(error);
-        console.error(`[synapse:ipc] request-failed ${JSON.stringify({ channel, code, message })}`);
+        this.container.logger.error("[synapse:ipc]", "request-failed", { channel, code, message });
         return { ok: false, error: { code, message } };
       }
     });

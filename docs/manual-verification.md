@@ -12,10 +12,12 @@
 ## Codex Hook
 
 - 在设置页安装 Hook，检查原 `~/.codex/hooks.json` 内容仍保留，并存在备份与 manifest。
+- 首次未安装 Hook 时，从挂件齿轮、空队列按钮和 Tray“打开设置”均可到达安装入口；设置页应提示在新的 Codex 任务中通过 `/hooks` 信任 Synapse。
 - 在 Codex `/hooks` 中确认三个 Synapse Hook 首次为 `untrusted`，信任后设置页显示 `trusted`；修改定义后应显示 `modified`。
 - 提交 prompt 后挂件立即显示 running；Stop 后卡片置顶并显示“总结”。
 - 关闭 Synapse，完成一个 Codex turn，再启动 Synapse；确认 spool 事件重放且文件随后删除。
 - 模拟数据库暂时不可写，确认 Receiver 不返回成功 ACK，Relay 将原始事件保留到 spool，而不是静默丢弃。
+- 检查 `~/Library/Application Support/Synapse/logs/synapse.log` 持久化记录启动、Hook 状态和事件接收日志。
 - 重复安装后卸载，确认只删除 Synapse handler，用户 Hook 未被删除。
 
 ## turn 选择与总结

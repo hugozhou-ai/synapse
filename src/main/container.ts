@@ -13,13 +13,14 @@ import { CodexHookProtocolMapper } from "@infrastructure/hooks/mapper";
 import { UnixSocketHookEventReceiver, type HookEventReceiver } from "@infrastructure/hooks/receiver";
 import { FileSystemHookRelayInstaller } from "@infrastructure/hooks/relay-installer";
 import { FileSystemHookEventSpool } from "@infrastructure/hooks/spool";
+import { JsonFileLogger } from "@infrastructure/logging/json-file-logger";
 import { NotesOutboxWorker } from "@infrastructure/notes/outbox-worker";
 import { AppleNotesSummaryPublisher } from "@infrastructure/notes/publisher";
 import { BetterSqliteSynapseDatabase } from "@infrastructure/sqlite/database";
 import { SqliteCodexSessionRepository, SqliteCodexTurnRepository, SqliteHookEventRepository, SqliteOutboxRepository, SqlitePublicationRepository, SqliteSettingsRepository, SqliteSummaryDocumentRepository, SqliteSummaryJobRepository, SqliteSummaryProfileRepository } from "@infrastructure/sqlite/repositories";
 import { BetterSqliteUnitOfWork } from "@infrastructure/sqlite/unit-of-work";
 import { NodeContentHashService, SystemClock, UuidGenerator } from "@infrastructure/system";
-import { JsonConsoleLogger } from "@shared/logger";
+import { CompositeLogger, JsonConsoleLogger, type Logger } from "@shared/logger";
 
 export class ElectronApplicationContainer {
   readonly sessionAwareness!: SessionAwarenessService;
@@ -34,6 +35,7 @@ export class ElectronApplicationContainer {
   readonly exports!: ExportApplicationService;
   readonly hookReceiver!: HookEventReceiver;
   readonly notesWorker!: NotesOutboxWorker;
+  readonly logger!: Logger;
 
   private constructor(
     services: Omit<ElectronApplicationContainer, "close">,
@@ -42,8 +44,12 @@ export class ElectronApplicationContainer {
   ) { Object.assign(this, services); }
 
   static async create(app: App, onSessionsChanged: () => void): Promise<ElectronApplicationContainer> {
-    const logger = new JsonConsoleLogger(); const clock = new SystemClock(); const ids = new UuidGenerator();
     const supportDirectory = app.getPath("userData");
+    const logger = new CompositeLogger([
+      new JsonConsoleLogger(),
+      new JsonFileLogger(join(supportDirectory, "logs", "synapse.log")),
+    ]);
+    const clock = new SystemClock(); const ids = new UuidGenerator();
     const databasePath = join(supportDirectory, "synapse.sqlite3");
     const database = new BetterSqliteSynapseDatabase(databasePath, logger);
     const sessions = new SqliteCodexSessionRepository(database);
@@ -74,7 +80,7 @@ export class ElectronApplicationContainer {
     const configStore = new JsonCodexHookConfigStore(codexDirectory, supportDirectory, logger);
     const relayPath = join(supportDirectory, "bin", "codex-hook-relay.sh");
     const relay = new FileSystemHookRelayInstaller(relayPath, resourcePath(app, "codex-hook-relay.sh"), logger);
-    const hookManagement = new CodexHookManagementService(configStore, relay, appServer, sessions, configStore.hooksPath);
+    const hookManagement = new CodexHookManagementService(configStore, relay, appServer, sessions, configStore.hooksPath, logger);
     const receiver = new UnixSocketHookEventReceiver(
       join(supportDirectory, "run", "hook.sock"), awareness, new CodexHookProtocolMapper(),
       new FileSystemHookEventSpool(join(supportDirectory, "spool")), logger, onSessionsChanged,
@@ -94,6 +100,7 @@ export class ElectronApplicationContainer {
       exports: new SystemExportApplicationService(summaries, new ElectronExportGateway(databasePath)),
       hookReceiver: receiver,
       notesWorker,
+      logger,
     };
     return new ElectronApplicationContainer(services as Omit<ElectronApplicationContainer, "close">, database, appServer);
   }

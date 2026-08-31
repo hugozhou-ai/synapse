@@ -53,6 +53,7 @@ Electron Builder 会为 Electron ABI 重建 `better-sqlite3`；`postpackage:mac`
 - 数据库：`~/Library/Application Support/Synapse/synapse.sqlite3`
 - Hook relay：`~/Library/Application Support/Synapse/bin/codex-hook-relay.sh`
 - Unix socket：`~/Library/Application Support/Synapse/run/hook.sock`
+- 运行日志：`~/Library/Application Support/Synapse/logs/synapse.log`
 - 离线事件：`~/Library/Application Support/Synapse/spool/`
 - Hook manifest 与备份：`~/Library/Application Support/Synapse/`
 

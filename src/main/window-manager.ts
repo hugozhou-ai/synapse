@@ -1,14 +1,22 @@
 import { BrowserWindow, Menu, Tray, app, nativeImage, screen } from "electron";
 import { join } from "node:path";
+import type { HookManagementService } from "@application/hook-management";
 import type { SettingsApplicationService } from "@application/query-services";
+import type { Logger } from "@shared/logger";
 import { resolveWidgetPlacement } from "./widget-placement";
+
+type WorkspaceRoute = "queue" | "history" | "settings" | `summary/${string}`;
 
 export class ElectronWindowManager {
   private widget: BrowserWindow | null = null;
   private workspace: BrowserWindow | null = null;
   private tray: Tray | null = null;
 
-  constructor(private readonly settings: SettingsApplicationService) {}
+  constructor(
+    private readonly settings: SettingsApplicationService,
+    private readonly hookManagement: HookManagementService,
+    private readonly logger: Logger,
+  ) {}
 
   async start(): Promise<void> {
     const settings = await this.settings.read();
@@ -19,20 +27,27 @@ export class ElectronWindowManager {
     await this.load(this.widget, "widget");
     if (settings.widgetVisible) this.widget.showInactive();
     this.createTray();
+    const hooks = await this.hookManagement.inspect();
+    if (!hooks.installed) this.logger.error("[synapse:hook]", "session-awareness-disabled", { message: hooks.message ?? "Hook is not installed." });
   }
 
-  async openHistory(): Promise<void> {
+  async openHistory(): Promise<void> { await this.openWorkspace("history"); }
+
+  async openSettings(): Promise<void> { await this.openWorkspace("settings"); }
+
+  async openQueue(): Promise<void> { await this.openWorkspace("queue"); }
+
+  async openSummary(sessionId: string): Promise<void> { await this.openWorkspace(`summary/${sessionId}`); }
+
+  private async openWorkspace(route: WorkspaceRoute): Promise<void> {
     if (!this.workspace || this.workspace.isDestroyed()) {
       this.workspace = this.createWindow({ width: 1180, height: 760, minWidth: 900, minHeight: 620, titleBarStyle: "hiddenInset", backgroundColor: "#f4f1eb" });
       this.workspace.on("closed", () => { this.workspace = null; });
-      await this.load(this.workspace, "history");
+      await this.load(this.workspace, route);
+    } else {
+      this.workspace.webContents.send("synapse:navigate", route);
     }
     this.workspace.show(); this.workspace.focus();
-  }
-
-  async openSummary(sessionId: string): Promise<void> {
-    await this.openHistory();
-    this.workspace?.webContents.send("synapse:navigate", `summary/${sessionId}`);
   }
 
   broadcastSessionsChanged(): void {
@@ -78,11 +93,13 @@ export class ElectronWindowManager {
   }
 
   private createTray(): void {
-    const image = nativeImage.createFromNamedImage("NSActionTemplate");
+    const image = nativeImage.createFromNamedImage("NSActionTemplate").resize({ width: 16, height: 16 });
+    image.setTemplateImage(true);
     this.tray = new Tray(image);
     this.tray.setToolTip("Synapse");
     this.tray.setContextMenu(Menu.buildFromTemplate([
       { label: "打开历史与总结", click: () => void this.openHistory() },
+      { label: "打开设置", click: () => void this.openSettings() },
       { label: "显示挂件", type: "checkbox", checked: this.widget?.isVisible() ?? true, click: (item) => { if (item.checked) this.widget?.showInactive(); else this.widget?.hide(); void this.settings.update({ widgetVisible: item.checked }); } },
       { type: "separator" },
       { label: "退出 Synapse", click: () => app.quit() },

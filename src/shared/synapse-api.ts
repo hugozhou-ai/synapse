@@ -40,6 +40,8 @@ export interface SynapseApi {
   };
   window: {
     openHistory(): Promise<void>;
+    openQueue(): Promise<void>;
+    openSettings(): Promise<void>;
     openSummary(sessionId: string): Promise<void>;
     resizeWidget(expanded: boolean): Promise<void>;
     onSessionsChanged(listener: () => void): () => void;
