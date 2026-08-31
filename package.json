@@ -46,6 +46,7 @@
   "build": {
     "appId": "com.synapse.codex",
     "productName": "Synapse",
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
     "files": [
       "out/**",
       "package.json"
