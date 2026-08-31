@@ -16,7 +16,7 @@ export function QueuePage({ onSummarize, onOpenSettings }: { onSummarize(id: str
         <div className="queue-copy"><h3>{session.title}</h3><p>{session.promptPreview || "等待 prompt 内容…"}</p><div className="meta"><span><Code2 size={13} />{shortPath(session.cwd)}</span><span><Clock3 size={13} />{formatDuration(session.elapsedSeconds)}</span></div></div>
         <div className="queue-actions">{session.status === "ready" && <button className="primary" onClick={() => onSummarize(session.id)}><Sparkles size={15} /> 总结</button>}<button className="ghost" onClick={() => window.synapse.sessions.ignore(session.id)}>{session.status === "running" ? "隐藏" : "忽略"}</button></div>
       </article>)}
-      {sessions.length === 0 && <EmptyState><Archive size={25} /><span>{hooks?.trusted ? "Hook 已启用；开始一个新的 Codex 任务或提交新的 prompt 后会显示在这里。" : hooks?.installed ? "Hook 已安装但尚未信任，请在设置中检查命令并启用。" : "尚未收到 Codex Hook 事件。首次使用需要先安装并信任 Hook。"}</span><button className="primary" onClick={onOpenSettings}>{hooks?.installed ? "检查 Hook" : "打开设置"}</button></EmptyState>}
+      {sessions.length === 0 && <EmptyState><Archive size={25} /><span>{hooks === null ? "正在检测 Codex Hook 状态…" : hooks.trusted ? "Hook 已启用；开始一个新的 Codex 任务或提交新的 prompt 后会显示在这里。" : hooks.installed ? "Hook 已安装但尚未信任，请在设置中检查命令并启用。" : "尚未收到 Codex Hook 事件。首次使用需要先安装并信任 Hook。"}</span>{hooks !== null && <button className="primary" onClick={onOpenSettings}>{hooks.installed ? "检查 Hook" : "打开设置"}</button>}</EmptyState>}
     </div>
   </div>;
 }

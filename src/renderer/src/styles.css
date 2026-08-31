@@ -409,6 +409,7 @@ input:not([type="checkbox"]) { min-height: 41px; }
 .health { padding: 6px 8px; border: 1px solid currentColor; font: 800 7px/1 var(--mono); text-transform: uppercase; }
 .health.good { color: var(--accent-ink); }
 .health.warn { color: var(--ink); }
+.hook-status-loading { padding: 12px 4px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--muted); font: 8px/1.5 var(--mono); }
 .settings-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .runtime-grid { margin-bottom: 16px; display: grid; grid-template-columns: 2fr 1fr 1fr; border: 1px solid var(--line); }
 .runtime-grid span { min-width: 0; padding: 11px 12px; display: grid; gap: 6px; border-right: 1px solid var(--line); }

@@ -28,7 +28,7 @@ export function Widget() {
     </div>
     {expanded && <div className="widget-body no-drag">
       {sessions.slice(0, 3).map((session) => <SessionMiniCard key={session.id} session={session} />)}
-      {sessions.length === 0 && <EmptyState compact><span>{hooksReady ? "等待新的 Codex 任务" : "需要先安装并信任 Codex Hook"}</span><button className="secondary tiny" onClick={() => window.synapse.window.openSettings()}>检查 Hook 设置</button></EmptyState>}
+      {sessions.length === 0 && <EmptyState compact><span>{hooks === null ? "正在检测 Codex Hook 状态" : hooksReady ? "等待新的 Codex 任务" : "需要先安装并信任 Codex Hook"}</span>{hooks !== null && !hooksReady && <button className="secondary tiny" onClick={() => window.synapse.window.openSettings()}>检查 Hook 设置</button>}</EmptyState>}
       <button className="widget-history" onClick={() => window.synapse.window.openHistory()}><BookOpen size={14} /> 打开历史</button>
     </div>}
   </main>;

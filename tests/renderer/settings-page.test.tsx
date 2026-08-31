@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HookInstallationStatus } from "@application/ports";
@@ -41,11 +41,28 @@ describe("SettingsPage", () => {
     await user.click(screen.getByRole("button", { name: "信任并启用（1）" }));
     await waitFor(() => expect(trust).toHaveBeenCalledOnce());
   });
+
+  it("does not show an untrusted state before Hook inspection completes", async () => {
+    const untrusted: HookInstallationStatus = {
+      installed: true, trusted: false, onboardingRequired: false, relayPath: "/relay", configPath: "/hooks.json", message: "待信任", trustStates: [],
+    };
+    let resolveInspection!: (status: HookInstallationStatus) => void;
+    const inspection = new Promise<HookInstallationStatus>((resolve) => { resolveInspection = resolve; });
+    installSettingsApi(untrusted, vi.fn(), vi.fn().mockReturnValue(inspection));
+    render(<SettingsPage />);
+
+    expect(screen.getByRole("status").textContent).toContain("正在检测 Hook 状态");
+    expect(screen.queryByText("待信任")).toBeNull();
+    expect(screen.queryByText("未安装")).toBeNull();
+
+    await act(async () => { resolveInspection(untrusted); await inspection; });
+    await waitFor(() => expect(screen.getAllByText("待信任").length).toBeGreaterThan(0));
+  });
 });
 
 function Broken(): never { throw new Error("render failed"); }
 
-function installSettingsApi(hookStatus: HookInstallationStatus = { installed: false, trusted: false, onboardingRequired: true, relayPath: "/relay", configPath: "/hooks.json", trustStates: [], message: null }, trust = vi.fn()) {
+function installSettingsApi(hookStatus: HookInstallationStatus = { installed: false, trusted: false, onboardingRequired: true, relayPath: "/relay", configPath: "/hooks.json", trustStates: [], message: null }, trust = vi.fn(), inspect = vi.fn().mockResolvedValue(hookStatus)) {
   Object.defineProperty(window, "synapse", {
     configurable: true,
     value: {
@@ -58,7 +75,7 @@ function installSettingsApi(hookStatus: HookInstallationStatus = { installed: fa
         models: vi.fn().mockResolvedValue([]), notesTargets: vi.fn().mockResolvedValue({ accounts: [] }), update: vi.fn(),
       },
       hooks: {
-        inspect: vi.fn().mockResolvedValue(hookStatus),
+        inspect,
         install: vi.fn(), trust, uninstall: vi.fn(), dismissOnboarding: vi.fn(),
       },
       profiles: { list: vi.fn().mockResolvedValue([]), save: vi.fn(), delete: vi.fn() },
