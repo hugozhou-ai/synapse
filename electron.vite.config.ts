@@ -18,11 +18,17 @@ export default defineConfig({
   preload: {
     plugins: [externalizeDepsPlugin()],
     resolve: { alias: aliases },
-    build: { rollupOptions: { input: resolve("src/preload/index.ts") } },
+    build: {
+      rollupOptions: {
+        input: resolve("src/preload/index.ts"),
+        output: { format: "cjs", entryFileNames: "index.cjs" },
+      },
+    },
   },
   renderer: {
     root: resolve("src/renderer"),
     resolve: { alias: aliases },
     plugins: [react()],
+    server: { host: "127.0.0.1", port: 43173, strictPort: true },
   },
 });

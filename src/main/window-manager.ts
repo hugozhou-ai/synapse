@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { HookManagementService } from "@application/hook-management";
 import type { SettingsApplicationService } from "@application/query-services";
 import type { Logger } from "@shared/logger";
+import { resolveRendererUrl } from "./renderer-url";
 import { resolveWidgetPlacement } from "./widget-placement";
 
 type WorkspaceRoute = "queue" | "history" | "settings" | `summary/${string}`;
@@ -70,11 +71,14 @@ export class ElectronWindowManager {
     const window = new BrowserWindow({
       ...options,
       webPreferences: {
-        preload: join(__dirname, "../preload/index.mjs"),
+        preload: join(__dirname, "../preload/index.cjs"),
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
       },
+    });
+    window.webContents.on("preload-error", (_event, preloadPath, error) => {
+      this.logger.error("[synapse:renderer]", "preload-failed", { preloadPath, message: error.message, stack: error.stack ?? null });
     });
     window.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
       this.logger.error("[synapse:renderer]", "page-load-failed", { errorCode, errorDescription, validatedURL, isMainFrame });
@@ -87,7 +91,7 @@ export class ElectronWindowManager {
 
   private async load(window: BrowserWindow, route: string): Promise<void> {
     const rendererUrl = process.env.ELECTRON_RENDERER_URL;
-    if (rendererUrl) await window.loadURL(`${rendererUrl}#/${route}`);
+    if (rendererUrl) await window.loadURL(resolveRendererUrl(rendererUrl, route));
     else await window.loadFile(join(__dirname, "../renderer/index.html"), { hash: `/${route}` });
   }
 

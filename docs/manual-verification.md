@@ -20,6 +20,8 @@
 - 模拟数据库暂时不可写，确认 Receiver 不返回成功 ACK，Relay 将原始事件保留到 spool，而不是静默丢弃。
 - 检查 `~/Library/Application Support/Synapse/logs/synapse.log` 持久化记录启动、Hook 状态和事件接收日志。
 - 模拟 Renderer 组件抛错时应显示可重新加载的错误页，并在日志中留下 `[synapse:renderer]` 记录，而不是白屏。
+- 开发模式固定监听 `127.0.0.1:43173`；若端口已占用应直接启动失败，不得在 IPv4/IPv6 的同名 `localhost` 上加载其他 Vite 项目。
+- 打包后确认 sandboxed preload 为 `out/preload/index.cjs`，设置页可正常读取 `window.synapse`，日志中没有 `preload-failed`。
 - 重复安装后卸载，确认只删除 Synapse handler，用户 Hook 未被删除。
 
 ## turn 选择与总结
