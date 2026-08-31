@@ -1,0 +1,99 @@
+name: Build macOS DMG
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-dmg-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.arch }} DMG
+    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - x64
+          - arm64
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run quality checks
+        run: npm run check
+
+      - name: Validate release tag
+        if: github.ref_type == 'tag'
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          expected_tag="v$(node -p "require('./package.json').version")"
+          if [[ "$RELEASE_TAG" != "$expected_tag" ]]; then
+            echo "Release tag $RELEASE_TAG does not match package version $expected_tag."
+            exit 1
+          fi
+
+      - name: Build application
+        run: npm run build
+
+      - name: Build application icons
+        run: npm run build:icons
+
+      - name: Package DMG
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: ./node_modules/.bin/electron-builder --mac dmg --${{ matrix.arch }} --publish never
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Synapse-${{ matrix.arch }}-dmg
+          path: dist/*.dmg
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download DMG artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: Synapse-*-dmg
+          path: dist
+          merge-multiple: true
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          gh release create "$RELEASE_TAG" dist/*.dmg \
+            --repo "$REPOSITORY" \
+            --verify-tag \
+            --generate-notes \
+            --title "Synapse $RELEASE_TAG"
