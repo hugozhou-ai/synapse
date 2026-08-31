@@ -22,6 +22,10 @@ interface ActiveAdapters {
   readonly trust: AppServerHookTrustGateway;
 }
 
+export function appServerAgentRuntimeDirectory(supportDirectory: string): string {
+  return join(supportDirectory, "agent-runtime");
+}
+
 export class LazyCodexAppServerRuntime implements
   SummaryAgentGateway,
   HookTrustGateway,
@@ -113,7 +117,7 @@ export class LazyCodexAppServerRuntime implements
           const authentication = account.account ? "signed-in" : account.requiresOpenaiAuth ? "required" : "not-required";
           this.adapters = {
             client,
-            agent: new CodexAppServerSummaryAgentGateway(client, join(this.supportDirectory, "agent-runtime")),
+            agent: new CodexAppServerSummaryAgentGateway(client, appServerAgentRuntimeDirectory(this.supportDirectory)),
             trust: new AppServerHookTrustGateway(client),
           };
           this.initializingClient = null;

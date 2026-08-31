@@ -6,7 +6,7 @@ import { PersistentSettingsApplicationService, RepositoryProfileApplicationServi
 import { HookBasedSessionAwarenessService, type SessionAwarenessService } from "@application/session-services";
 import { OutboxSummaryPublicationService, ProfileDrivenSummaryGenerationService, TransactionalSummaryDeletionService, VersionedSummaryFinalizationService, type SummaryDeletionService, type SummaryFinalizationService, type SummaryGenerationService, type SummaryPublicationService } from "@application/summary-services";
 import { ArbitraryTurnSelectionService, DefaultSessionLifecycleService, NormalizedTurnSummaryContextService } from "@domain/services";
-import { LazyCodexAppServerRuntime } from "@infrastructure/app-server/runtime";
+import { appServerAgentRuntimeDirectory, LazyCodexAppServerRuntime } from "@infrastructure/app-server/runtime";
 import { ElectronExportGateway } from "@infrastructure/electron/export-gateway";
 import { JsonCodexHookConfigStore } from "@infrastructure/hooks/config-store";
 import { CodexHookProtocolMapper } from "@infrastructure/hooks/mapper";
@@ -85,6 +85,7 @@ export class ElectronApplicationContainer {
     const receiver = new UnixSocketHookEventReceiver(
       join(supportDirectory, "run", "hook.sock"), awareness, new CodexHookProtocolMapper(),
       new FileSystemHookEventSpool(join(supportDirectory, "spool")), logger, onSessionsChanged,
+      appServerAgentRuntimeDirectory(supportDirectory),
     );
     const notesWorker = new NotesOutboxWorker(outbox, publication, clock, logger);
 

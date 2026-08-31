@@ -1,5 +1,5 @@
 import { chmod, mkdir, rm } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 import { createServer, type Server, type Socket } from "node:net";
 import type { SessionAwarenessService } from "@application/session-services";
 import type { Logger } from "@shared/logger";
@@ -21,6 +21,7 @@ export class UnixSocketHookEventReceiver implements HookEventReceiver {
     private readonly spool: HookEventSpool,
     private readonly logger: Logger,
     private readonly onChanged: () => void,
+    private readonly internalSessionCwd: string,
   ) {}
 
   async start(): Promise<void> {
@@ -87,6 +88,12 @@ export class UnixSocketHookEventReceiver implements HookEventReceiver {
   private async ingest(raw: string): Promise<void> {
     try {
       const event = this.mapper.map(raw.trim());
+      if (event.cwd.length > 0 && resolve(event.cwd) === resolve(this.internalSessionCwd)) {
+        this.logger.info("[synapse:hook]", "internal-session-filtered", {
+          eventType: event.eventType, sessionId: event.sessionId, turnId: event.turnId, cwd: event.cwd,
+        });
+        return;
+      }
       await this.awareness.ingest(event);
       this.onChanged();
       this.logger.info("[synapse:hook]", "event-ingested", { eventType: event.eventType, sessionId: event.sessionId, turnId: event.turnId });
