@@ -101,7 +101,7 @@ html[data-surface="workspace"] #root {
 .widget-shell.collapsed .widget-top { height: 40px; min-height: 40px; padding: 0; justify-content: center; }
 .widget-shell.activity .widget-top { height: 56px; min-height: 56px; padding: 0 13px; justify-content: flex-start; }
 .synapse-mark { width: 30px; height: 30px; padding: 0; flex: none; border: 0; color: inherit; background: transparent; cursor: pointer; touch-action: none; user-select: none; }
-.widget-shell.collapsed .synapse-mark { width: 36px; height: 36px; }
+.widget-shell.collapsed .synapse-mark { width: 36px; height: 36px; overflow: hidden; border-radius: 9px; }
 .synapse-logo { width: 100%; height: 100%; display: block; object-fit: cover; }
 .widget-counters { display: flex; align-items: stretch; gap: 0; border: 1px solid var(--line); }
 .counter { min-height: 30px; padding: 0 9px; display: inline-flex; align-items: center; border: 0; border-right: 1px solid var(--line); color: var(--muted); background: transparent; font: 9px/1 var(--mono); white-space: nowrap; }

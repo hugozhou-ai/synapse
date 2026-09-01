@@ -33,7 +33,7 @@ export class ElectronWindowManager {
     const collapsedBounds = resolveWidgetBounds("collapsed", 0);
     this.configureDevelopmentDockIcon();
     this.workspaceDock.hide();
-    this.widget = this.createWindow({ width: collapsedBounds.width, height: collapsedBounds.height, transparent: true, backgroundColor: "#00000000", frame: false, resizable: false, skipTaskbar: true, alwaysOnTop: true });
+    this.widget = this.createWindow({ width: collapsedBounds.width, height: collapsedBounds.height, transparent: true, backgroundColor: "#00000000", frame: false, roundedCorners: false, resizable: false, skipTaskbar: true, alwaysOnTop: true });
     this.widget.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     this.widget.setAlwaysOnTop(true, "floating");
     this.widget.on("blur", () => this.dismissWidget());
