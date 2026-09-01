@@ -1,67 +1,113 @@
+<p align="center">
+  <a href="https://github.com/hugozhou-ai/synapse">
+    <img alt="Synapse logo" src="build/icon-master.png" width="144" />
+  </a>
+</p>
+
 # Synapse
 
-Synapse 是一个 macOS 优先的 Electron 全局挂件：通过 Codex lifecycle Hooks 感知并持久化正在进行和刚结束的本地任务，再调用本地 Codex App Server，把选定 turns 整理成可编辑、可追溯的总结。
+[![中文文档](https://img.shields.io/badge/中文-文档-blue)](README.zh-CN.md)
 
-主要能力：
+Synapse is a local-first Codex task widget and summary workspace for macOS. It observes active and recently completed local tasks through Codex lifecycle Hooks, then uses the local Codex App Server to turn selected turns into editable, searchable, and traceable summaries.
 
-- 透明、置顶、跨 Space 的全局挂件与 Tray。
-- `SessionStart` / `UserPromptSubmit` / `Stop` Hook 感知，完整 prompt/assistant 内容本地落库，Unix socket 在线传输与 `0600` 离线 spool。
-- 任意 turn 多选、Shift 连选、350ms 长按拖选。
-- 本地 Codex App Server 总结 harness，固定 JSON Schema，长会话按 turn 分块。
-- SQLite WAL 主存储、不可变版本历史、FTS5 搜索与 Markdown/JSON 导出。
-- Apple Notes 可选同步；同一总结持续更新同一便签。
+Synapse currently supports macOS only and requires a locally available Codex binary. It does not send task content to a Synapse-operated service; summary generation follows the user's existing Codex configuration and data-handling setup.
 
-实现依据：[Codex Hooks](https://learn.chatgpt.com/codex/hooks) 与 [Codex App Server](https://learn.chatgpt.com/codex/app-server)。App Server 使用稳定的 `stdio` JSONL transport。
+> **Project status:** Synapse is in early development. The repository does not currently provide signed and notarized binaries; run it from source or build it locally.
 
-## 开发
+## Workflow
 
-要求：macOS、Node.js 22.13+、本地可用的 Codex 或 ChatGPT Desktop 内置 Codex binary。
+```text
+Codex lifecycle Hooks
+          ↓
+Unix socket / offline spool
+          ↓
+Local SQLite storage
+          ↓
+Codex App Server generates a structured draft
+          ↓
+Edit and finalize → History / Markdown / JSON / Apple Notes
+```
+
+1. Synapse shows active and pending Codex tasks in a global desktop widget.
+2. After a task stops, select any combination of turns to use as the factual source.
+3. Codex App Server generates a structured draft whose title, abstract, tags, and Markdown body remain editable and previewable.
+4. Finalized summaries retain immutable version history and can be exported or synchronized to Apple Notes.
+
+## Features
+
+- **Global task widget**: Transparent, always on top, and visible across Spaces, with menu bar controls and multi-display position restoration.
+- **Reliable Hook ingestion**: Observes `SessionStart`, `UserPromptSubmit`, and `Stop`; writes events to a `0600` offline spool when the Unix socket is unavailable and replays them after recovery.
+- **Precise turn selection**: Supports arbitrary multi-selection, Shift-range selection, and drag selection after a roughly 350 ms long press.
+- **Structured summaries**: Produces a title, abstract, Markdown body, and tags through a fixed JSON Schema; long conversations are chunked at turn boundaries without silently dropping sources.
+- **Traceable history**: Uses SQLite WAL storage, immutable versions, FTS5 full-text search, and Markdown / JSON export.
+- **Apple Notes sync**: Targets a selected account and folder, updates the same note for the same summary, and leaves failed publications available for explicit retry.
+- **Least-privilege execution**: Runs the summary agent in a read-only sandbox and an isolated empty directory, with explicit instructions not to call tools, read or write files, or access the network.
+
+## Requirements
+
+- macOS
+- Node.js `22.13.0` or later
+- A Codex binary available from one of the following:
+  - Codex CLI
+  - Codex Desktop
+  - The Codex binary bundled with ChatGPT Desktop
+
+SQLite uses the `node:sqlite` implementation bundled with both Node.js and Electron, so development, testing, and packaging do not require native module ABI switching.
+
+## Run from source
 
 ```bash
+git clone https://github.com/hugozhou-ai/synapse.git
+cd synapse
 npm install
 npm run dev
 ```
 
-质量检查：
+## First-time setup
+
+1. On first launch, Synapse opens the setup flow if Hook setup has not been completed or dismissed. You can also open **Settings → Codex Hook** from the widget or menu bar icon.
+2. Select **Install Hook**. Synapse backs up and atomically merges `~/.codex/hooks.json`, then enables the canonical `hooks = true` entry under `[features]`.
+3. Review the complete commands and all three Hook events in the security confirmation, then select **Trust and Enable**. You can also enter `/hooks` in Codex to inspect their status.
+4. Start or resume a Codex task. The widget should show it as active after a prompt is submitted; when the task stops, its card moves to the top and exposes the summary action.
+5. Choose turns, a summary profile, and a model to generate a draft. After editing and finalizing it, the result can be searched, regenerated, or exported from history.
+
+To use Apple Notes, choose a target account and folder in Settings, then allow Synapse to control Notes when macOS displays its first permission prompt.
+
+Uninstalling the Hook removes only the Synapse handlers recorded in its manifest. Existing user Hook configuration remains intact.
+
+## Local data and privacy
+
+Synapse stores the complete prompt and assistant content supplied by Hooks, minimal event metadata, and summary versions on the local machine for task tracking and later summarization. Runtime logs do not contain prompts, conversation bodies, or summary bodies.
+
+| Data | Default location |
+| --- | --- |
+| SQLite database | `~/Library/Application Support/Synapse/synapse.sqlite3` |
+| Hook relay | `~/Library/Application Support/Synapse/bin/codex-hook-relay.sh` |
+| Unix socket | `~/Library/Application Support/Synapse/run/hook.sock` |
+| Runtime log | `~/Library/Application Support/Synapse/logs/synapse.log` |
+| Offline events | `~/Library/Application Support/Synapse/spool/` |
+| Hook manifest and backups | `~/Library/Application Support/Synapse/` |
+
+## Verification and builds
+
+Run the complete quality checks:
 
 ```bash
 npm run check
 npm run build
 ```
 
-生成 macOS 安装包：
+`npm run check` runs TypeScript type checking, architecture dependency checks, and the automated test suite. Tests use a fake App Server, temporary SQLite databases, and a temporary Codex configuration directory; they do not modify the real `~/.codex` directory or consume Codex usage.
+
+Build macOS DMG and ZIP artifacts:
 
 ```bash
 npm run package:mac
 ```
 
-SQLite 使用 Node 与 Electron 均内置的 `node:sqlite`，开发、测试和打包不需要切换原生模块 ABI。
+Production distribution requires Developer ID signing and notarization credentials in the Electron Builder environment. [`build/entitlements.mac.plist`](build/entitlements.mac.plist) already includes the Apple Events entitlement.
 
-正式分发需要在 Electron Builder 环境中配置 Developer ID 签名与公证凭据。`build/entitlements.mac.plist` 已包含 Apple Events entitlement。
-
-## 首次使用
-
-1. 首次启动且尚未处理过 Hook 设置时，Synapse 会自动打开设置引导；也可从挂件齿轮或 Tray 进入“设置 → Codex Hook”。点击“安装 Hook”后，Synapse 会备份并原子合并 `~/.codex/hooks.json`，并在 `[features]` 中启用规范的 `hooks = true`。
-2. 在 Codex 中输入 `/hooks`，检查来源并信任 `Managed by Synapse` 的三个 Hook。Synapse 不会绕过 Codex 的信任机制。
-3. 重启或恢复一个 Codex 任务。提交 prompt 后挂件应立即显示进行中，Stop 后卡片置顶并出现“总结”。
-4. 如需 Apple Notes，在设置中从已发现的账户/文件夹中选择目标（也可新建文件夹），并在 macOS 首次权限提示中允许 Synapse 控制“便签”。
-
-卸载 Hook 只会删除 manifest 标记的 Synapse handler；用户原有配置保持不变。
-
-## 本地数据
-
-- 数据库：`~/Library/Application Support/Synapse/synapse.sqlite3`
-- Hook relay：`~/Library/Application Support/Synapse/bin/codex-hook-relay.sh`
-- Unix socket：`~/Library/Application Support/Synapse/run/hook.sock`
-- 运行日志：`~/Library/Application Support/Synapse/logs/synapse.log`
-- 离线事件：`~/Library/Application Support/Synapse/spool/`
-- Hook manifest 与备份：`~/Library/Application Support/Synapse/`
-
-SQLite 保存 Hook 提供的完整 prompt/assistant 内容、事件最小元数据和总结版本，供后台整理直接使用；数据不会发送到 Synapse 自有服务。日志不会记录 prompt、会话正文或总结正文，动态字段统一经 `JSON.stringify` 输出。
-
-## 架构
-
-依赖方向固定为：
+## Architecture
 
 ```text
 Renderer / Preload / IPC
@@ -73,6 +119,9 @@ Domain Aggregates / Domain Services
 Ports ← Infrastructure Adapters
 ```
 
-详细类与接口映射见 [docs/architecture.md](docs/architecture.md)，人工联调步骤见 [docs/manual-verification.md](docs/manual-verification.md)。
+The domain layer has no dependency on Electron, Node.js, SQLite, or external protocols, and the main process is the sole Composition Root. App Server communication uses its stable `stdio` JSONL transport. For implementation details, see:
 
-自动化测试使用 Fake App Server、临时 SQLite 和临时 Codex 配置目录，不修改真实 `~/.codex`，也不消耗 Codex 额度。
+- [Architecture and domain boundaries](docs/architecture.md)
+- [macOS manual verification checklist](docs/manual-verification.md)
+- [Codex Hooks documentation](https://learn.chatgpt.com/docs/hooks)
+- [Codex App Server documentation](https://learn.chatgpt.com/docs/app-server)
