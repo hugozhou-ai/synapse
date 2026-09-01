@@ -2,20 +2,78 @@ name: Build macOS DMG
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - "v*"
+    inputs:
+      version_bump:
+        description: Version component to increment
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
 
 permissions:
   contents: read
 
 concurrency:
-  group: macos-dmg-${{ github.ref }}
+  group: macos-dmg-release
   cancel-in-progress: false
 
 jobs:
+  version:
+    name: Determine release version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Determine next version
+        id: version
+        env:
+          VERSION_BUMP: ${{ inputs.version_bump }}
+        run: |
+          node <<'NODE'
+          const { execFileSync } = require("node:child_process");
+          const { appendFileSync } = require("node:fs");
+          const packageVersion = require("./package.json").version;
+
+          const tags = execFileSync("git", ["tag", "--list"], { encoding: "utf8" });
+          const versions = [...tags.split("\n"), `v${packageVersion}`]
+            .map((tag) => tag.match(/^v(\d+)\.(\d+)\.(\d+)$/))
+            .filter(Boolean)
+            .map((match) => match.slice(1).map(Number))
+            .sort((left, right) =>
+              left[0] - right[0] || left[1] - right[1] || left[2] - right[2]
+            );
+
+          const current = versions.at(-1) ?? [0, 0, 0];
+          const next = [...current];
+          if (process.env.VERSION_BUMP === "major") {
+            next[0] += 1;
+            next[1] = 0;
+            next[2] = 0;
+          } else if (process.env.VERSION_BUMP === "minor") {
+            next[1] += 1;
+            next[2] = 0;
+          } else {
+            next[2] += 1;
+          }
+
+          const version = next.join(".");
+          appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\ntag=v${version}\n`);
+          console.log(`Preparing Synapse v${version}`);
+          NODE
+
   build:
     name: Build ${{ matrix.arch }} DMG
+    needs: version
     runs-on: macos-14
     strategy:
       fail-fast: false
@@ -37,19 +95,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Set release version
+        env:
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
+        run: npm version "$RELEASE_VERSION" --no-git-tag-version
+
       - name: Run quality checks
         run: npm run check
-
-      - name: Validate release tag
-        if: github.ref_type == 'tag'
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          expected_tag="v$(node -p "require('./package.json').version")"
-          if [[ "$RELEASE_TAG" != "$expected_tag" ]]; then
-            echo "Release tag $RELEASE_TAG does not match package version $expected_tag."
-            exit 1
-          fi
 
       - name: Build application
         run: npm run build
@@ -65,15 +117,16 @@ jobs:
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v7
         with:
-          name: Synapse-${{ matrix.arch }}-dmg
-          path: dist/*.dmg
+          name: Synapse-${{ needs.version.outputs.version }}-${{ matrix.arch }}-dmg
+          path: dist/Synapse-${{ needs.version.outputs.version }}-${{ matrix.arch }}.dmg
           if-no-files-found: error
           retention-days: 14
 
   release:
-    name: Publish GitHub Release
-    if: github.ref_type == 'tag'
-    needs: build
+    name: Create tag and publish GitHub Release
+    needs:
+      - version
+      - build
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -82,18 +135,19 @@ jobs:
       - name: Download DMG artifacts
         uses: actions/download-artifact@v8
         with:
-          pattern: Synapse-*-dmg
+          pattern: Synapse-${{ needs.version.outputs.version }}-*-dmg
           path: dist
           merge-multiple: true
 
-      - name: Publish release
+      - name: Create tag and publish release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ needs.version.outputs.tag }}
           REPOSITORY: ${{ github.repository }}
+          TARGET_SHA: ${{ github.sha }}
         run: |
           gh release create "$RELEASE_TAG" dist/*.dmg \
             --repo "$REPOSITORY" \
-            --verify-tag \
+            --target "$TARGET_SHA" \
             --generate-notes \
             --title "Synapse $RELEASE_TAG"
