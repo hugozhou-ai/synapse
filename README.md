@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://github.com/hugozhou-ai/synapse">
-    <img alt="Synapse logo" src="build/icon-master.png" width="144" />
+    <img alt="Synapse logo" src="docs/assets/readme-icon-rounded.png" width="144" />
   </a>
 </p>
 
