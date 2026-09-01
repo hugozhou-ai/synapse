@@ -1,5 +1,5 @@
 import type { AgentModel, ApplicationSettings, ApplicationSettingsUpdate, AppServerRuntimeStatus, HookInstallationStatus, SummarySearchCriteria, SummarySearchResult } from "@application/ports";
-import type { ConversationTurnsView, FinalizeSummaryCommand, FinalizedSummaryView, GenerateSummaryCommand, NotesTargetsView, RegenerateSummaryCommand, RendererErrorReport, SaveProfileCommand, SummaryDetailView, SummaryDraft, SummaryProfileView, UpdateDraftCommand, WidgetSessionView } from "@application/contracts";
+import type { ConversationTurnsView, FinalizeSummaryCommand, FinalizedSummaryView, GenerateSummaryCommand, NotesTargetsView, RegenerateSummaryCommand, RendererErrorReport, SaveProfileCommand, SummaryDetailView, SummaryDraft, SummaryGenerationActivityView, SummaryProfileView, UpdateDraftCommand, WidgetSessionView } from "@application/contracts";
 import type { WidgetBounds } from "./widget-layout";
 
 export interface SynapseApi {
@@ -17,6 +17,7 @@ export interface SynapseApi {
     get(documentId: string): Promise<SummaryDetailView>;
     delete(documentId: string): Promise<void>;
     retryNotes(documentId: string): Promise<void>;
+    onActivity(listener: (activity: SummaryGenerationActivityView) => void): () => void;
   };
   profiles: {
     list(): Promise<readonly SummaryProfileView[]>;

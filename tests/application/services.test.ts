@@ -44,11 +44,12 @@ describe("application services", () => {
       const profile = (await profiles.list())[0]!;
       let releaseAgent: () => void = () => undefined; let markAgentStarted: () => void = () => undefined;
       const agentStarted = new Promise<void>((resolveStarted) => { markAgentStarted = resolveStarted; });
-      let id = 0; let changes = 0;
+      let id = 0; let changes = 0; const activityMessages: string[] = [];
       const service = new DestinationAwareSummaryGenerationService(
         new ArbitraryTurnSelectionService(), new NormalizedTurnSummaryContextService(new NodeContentHashService()),
-        { async generate() { await new Promise<void>((resolveAgent) => { releaseAgent = resolveAgent; markAgentStarted(); }); return { title: "Title", abstract: "", bodyMarkdown: "Body", tags: [], model: null, stages: [{ kind: "final", turnIds: ["turn"] }] }; }, async cancel() {}, async listModels() { return []; } },
+        { async generate(_request, onActivity) { onActivity?.({ message: "正在核对事实…" }); await new Promise<void>((resolveAgent) => { releaseAgent = resolveAgent; markAgentStarted(); }); return { title: "Title", abstract: "", bodyMarkdown: "Body", tags: [], model: null, stages: [{ kind: "final", turnIds: ["turn"] }] }; }, async cancel() {}, async listModels() { return []; } },
         profiles, summaries, sessions, jobs, new SqliteUnitOfWork(database), { now: () => "d" }, { next: () => `job-state-${++id}` }, () => { changes += 1; },
+        (activity) => activityMessages.push(`${activity.sessionId}:${activity.message}`),
       );
       const command = { sessionId: "session", selectedTurnIds: ["turn"], model: null, destination: { kind: "new" as const, profileId: profile.id, publicationTarget: null } };
       const generation = service.generateDraft(command);
@@ -56,12 +57,14 @@ describe("application services", () => {
 
       expect((await jobs.findActiveBySessionId("session"))?.status).toBe("running");
       expect(changes).toBe(1);
+      expect(activityMessages).toEqual(["session:正在准备整理任务…", "session:正在核对事实…"]);
       await expect(service.generateDraft(command)).rejects.toMatchObject({ code: "SUMMARY_ALREADY_RUNNING" });
 
       releaseAgent();
       await generation;
       expect(await jobs.findActiveBySessionId("session")).toBeNull();
       expect(changes).toBe(2);
+      expect(activityMessages.at(-1)).toBe("session:草稿已生成，正在保存版本…");
     } finally { database.close(); }
   });
 

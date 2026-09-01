@@ -18,6 +18,7 @@ const api: SynapseApi = {
     generate: (command) => invoke("summaries:generate", command), regenerate: (command) => invoke("summaries:regenerate", command), updateDraft: (command) => invoke("summaries:update", command),
     finalize: (command) => invoke("summaries:finalize", command), search: (query) => invoke("summaries:search", query),
     get: (id) => invoke("summaries:get", id), delete: (id) => invoke("summaries:delete", id), retryNotes: (id) => invoke("summaries:retry-notes", id),
+    onActivity: (listener) => { const handler = (_event: Electron.IpcRendererEvent, activity: Parameters<typeof listener>[0]) => listener(activity); ipcRenderer.on("synapse:summary-activity", handler); return () => ipcRenderer.removeListener("synapse:summary-activity", handler); },
   },
   profiles: { list: () => invoke("profiles:list"), save: (command) => invoke("profiles:save", command), delete: (id) => invoke("profiles:delete", id) },
   settings: { read: () => invoke("settings:read"), update: (command) => invoke("settings:update", command), models: () => invoke("settings:models"), notesTargets: () => invoke("settings:notes-targets"), runtime: () => invoke("settings:runtime") },

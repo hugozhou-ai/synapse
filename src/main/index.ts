@@ -10,7 +10,11 @@ let windows: ElectronWindowManager | null = null;
 let quitting = false;
 
 app.whenReady().then(async () => {
-  container = await ElectronApplicationContainer.create(app, () => windows?.broadcastSessionsChanged());
+  container = await ElectronApplicationContainer.create(
+    app,
+    () => windows?.broadcastSessionsChanged(),
+    (activity) => windows?.broadcastSummaryActivity(activity),
+  );
   container.logger.info("[synapse:main]", "application-starting", { version: app.getVersion(), packaged: app.isPackaged });
   windows = new ElectronWindowManager(container.settings, container.hookManagement, container.logger);
   new ElectronIpcController(container, windows).register();

@@ -44,6 +44,12 @@ export interface SummaryDraft {
   readonly content: SummaryContentView;
 }
 
+export interface SummaryGenerationActivityView {
+  readonly jobId: string;
+  readonly sessionId: string;
+  readonly message: string;
+}
+
 export interface UpdateDraftCommand { readonly documentId: string; readonly expectedVersionId: string; readonly content: SummaryContentView; }
 export interface FinalizeSummaryCommand { readonly documentId: string; readonly expectedVersionId: string; readonly content: SummaryContentView; }
 

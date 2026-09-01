@@ -16,12 +16,14 @@ describe("App Server adapters", () => {
 
   it("captures a completion emitted before turn/start returns and uses a fixed output schema", async () => {
     const requests: Array<{ method: string; params: unknown }> = []; const listeners = new Set<(notification: CodexNotification) => void>();
+    const activities: string[] = [];
     const client: CodexAppServerClient = {
       async connect() {},
       async request<T>(method: string, params: unknown): Promise<T> {
         requests.push({ method, params });
         if (method === "thread/start") return { thread: { id: "summary-thread" } } as T;
         if (method === "turn/start") {
+          for (const listener of listeners) listener({ method: "item/agentMessage/delta", params: { threadId: "summary-thread", turnId: "summary-turn", itemId: "message", delta: "{\"title\":" } });
           for (const listener of listeners) listener({ method: "turn/completed", params: { threadId: "summary-thread", turn: { id: "summary-turn", status: "completed", items: [{ type: "agentMessage", text: JSON.stringify({ title: "Title", abstract: "Abstract", bodyMarkdown: "# Body", tags: ["tag"] }) }] } } });
           return { turn: { id: "summary-turn" } } as T;
         }
@@ -30,9 +32,11 @@ describe("App Server adapters", () => {
       subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); }, async close() {},
     };
     const gateway = new CodexAppServerSummaryAgentGateway(client, "/tmp/synapse-agent-test");
-    const result = await gateway.generate({ jobId: "job", generationMode: "new", context: { sourceTurnIds: ["turn"], sourceHash: "hash", chunks: [{ turnIds: ["turn"], content: "conversation" }] }, profile: new SummaryProfile("p", "Profile", "systemPrompt", "Summarize facts", true), model: "test-model" });
+    const result = await gateway.generate({ jobId: "job", generationMode: "new", context: { sourceTurnIds: ["turn"], sourceHash: "hash", chunks: [{ turnIds: ["turn"], content: "conversation" }] }, profile: new SummaryProfile("p", "Profile", "systemPrompt", "Summarize facts", true), model: "test-model" }, (activity) => activities.push(activity.message));
     expect(result.title).toBe("Title");
     expect(result.stages).toEqual([{ kind: "final", turnIds: ["turn"] }]);
+    expect(activities).toEqual(["正在根据整理方案组织完整草稿…"]);
+    expect(activities.join(" ")).not.toContain("title");
     expect(requests.find((request) => request.method === "thread/start")?.params).toMatchObject({ approvalPolicy: "never", sandbox: "read-only", ephemeral: true });
     expect(requests.find((request) => request.method === "turn/start")?.params).toHaveProperty("outputSchema");
   });
@@ -108,6 +112,7 @@ describe("App Server adapters", () => {
 
   it("records chunk coverage before the final synthesis", async () => {
     let thread = 0; let turns = 0; const listeners = new Set<(notification: CodexNotification) => void>();
+    const activities: string[] = [];
     const client: CodexAppServerClient = {
       async connect() {},
       async request<T>(method: string, params: unknown): Promise<T> {
@@ -122,9 +127,10 @@ describe("App Server adapters", () => {
       subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); }, async close() {},
     };
     const gateway = new CodexAppServerSummaryAgentGateway(client, "/tmp/synapse-agent-chunks");
-    const result = await gateway.generate({ jobId: "job", generationMode: "new", context: { sourceTurnIds: ["one", "two"], sourceHash: "hash", chunks: [{ turnIds: ["one"], content: "first" }, { turnIds: ["two"], content: "second" }] }, profile: new SummaryProfile("p", "Profile", "systemPrompt", "Summarize", true), model: null });
+    const result = await gateway.generate({ jobId: "job", generationMode: "new", context: { sourceTurnIds: ["one", "two"], sourceHash: "hash", chunks: [{ turnIds: ["one"], content: "first" }, { turnIds: ["two"], content: "second" }] }, profile: new SummaryProfile("p", "Profile", "systemPrompt", "Summarize", true), model: null }, (activity) => activities.push(activity.message));
     expect(result.stages).toEqual([{ kind: "chunk", turnIds: ["one"] }, { kind: "chunk", turnIds: ["two"] }, { kind: "final", turnIds: ["one", "two"] }]);
     expect(turns).toBe(3);
+    expect(activities).toEqual(["正在提取第 1/2 段事实…", "正在提取第 2/2 段事实…", "正在根据整理方案组织完整草稿…"]);
   });
 
   it("reports the worst trust state for Synapse-owned hooks", async () => {

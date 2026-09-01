@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { App } from "electron";
+import type { SummaryGenerationActivityView } from "@application/contracts";
 import { CodexHookManagementService, type HookManagementService } from "@application/hook-management";
 import { PersistentSettingsApplicationService, RepositoryProfileApplicationService, RepositorySessionQueryService, RepositorySummaryQueryService, SystemExportApplicationService, type ExportApplicationService, type ProfileApplicationService, type SessionQueryService, type SettingsApplicationService, type SummaryQueryService } from "@application/query-services";
 import { HookBasedSessionAwarenessService, type SessionAwarenessService } from "@application/session-services";
@@ -44,7 +45,11 @@ export class ElectronApplicationContainer {
     private readonly appServer: LazyCodexAppServerRuntime,
   ) { Object.assign(this, services); }
 
-  static async create(app: App, onSessionsChanged: () => void): Promise<ElectronApplicationContainer> {
+  static async create(
+    app: App,
+    onSessionsChanged: () => void,
+    onSummaryActivity: (activity: SummaryGenerationActivityView) => void,
+  ): Promise<ElectronApplicationContainer> {
     const supportDirectory = app.getPath("userData");
     const logger = new CompositeLogger([
       new JsonConsoleLogger(),
@@ -71,7 +76,7 @@ export class ElectronApplicationContainer {
     appServer.start();
     const summaryGeneration = new DestinationAwareSummaryGenerationService(
       new ArbitraryTurnSelectionService(), new NormalizedTurnSummaryContextService(new NodeContentHashService()),
-      appServer, profiles, summaries, sessions, jobs, unitOfWork, clock, ids, onSessionsChanged,
+      appServer, profiles, summaries, sessions, jobs, unitOfWork, clock, ids, onSessionsChanged, onSummaryActivity,
     );
     const finalization = new VersionedSummaryFinalizationService(summaries, sessions, outbox, publications, unitOfWork, clock, ids);
     const notesScript = resourcePath(app, "apple-notes-publisher.jxa");

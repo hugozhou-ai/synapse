@@ -9,7 +9,7 @@ import type {
   SummaryPublisher, TurnSelectionValidator, UnitOfWork,
 } from "./ports";
 import type {
-  FinalizeSummaryCommand, GenerateSummaryCommand, RegenerateSummaryCommand, SummaryDraft, UpdateDraftCommand,
+  FinalizeSummaryCommand, GenerateSummaryCommand, RegenerateSummaryCommand, SummaryDraft, SummaryGenerationActivityView, UpdateDraftCommand,
 } from "./contracts";
 
 export interface SummaryGenerationService {
@@ -64,6 +64,7 @@ export class DestinationAwareSummaryGenerationService implements SummaryGenerati
     private readonly clock: Clock,
     private readonly ids: IdGenerator,
     private readonly onJobsChanged: () => void,
+    private readonly onActivity: (activity: SummaryGenerationActivityView) => void = () => undefined,
   ) {}
 
   async generateDraft(command: GenerateSummaryCommand): Promise<SummaryDraft> {
@@ -154,9 +155,12 @@ export class DestinationAwareSummaryGenerationService implements SummaryGenerati
 
   private async runAgent(input: AgentRunInput): Promise<SummaryDraft> {
     try {
+      const publishActivity = (message: string) => this.onActivity({ jobId: input.jobId, sessionId: input.sourceSessionId, message });
+      publishActivity("正在准备整理任务…");
       const generated = input.generationMode === "new"
-        ? await this.agent.generate({ jobId: input.jobId, context: input.context, model: input.model, generationMode: "new", profile: input.profile })
-        : await this.agent.generate({ jobId: input.jobId, context: input.context, model: input.model, generationMode: "merge", target: input.target });
+        ? await this.agent.generate({ jobId: input.jobId, context: input.context, model: input.model, generationMode: "new", profile: input.profile }, (activity) => publishActivity(activity.message))
+        : await this.agent.generate({ jobId: input.jobId, context: input.context, model: input.model, generationMode: "merge", target: input.target }, (activity) => publishActivity(activity.message));
+      publishActivity("草稿已生成，正在保存版本…");
       const now = this.clock.now();
       const version = await this.unitOfWork.execute(async () => {
         const document = await this.summaries.findById(input.documentId);
