@@ -25,7 +25,6 @@ export function SummaryComposer({ sessionId, onClose }: { sessionId: string; onC
   const [targetItems, setTargetItems] = useState<readonly SummarySearchItem[]>([]);
   const [targetDocumentId, setTargetDocumentId] = useState("");
   const [targetDetail, setTargetDetail] = useState<SummaryDetailView | null>(null);
-  const [generationActivity, setGenerationActivity] = useState("");
   const [loadError, setLoadError] = useState<string | null>(null);
   const draft = useSummaryDraft();
   const loadConversation = useCallback(() => {
@@ -69,16 +68,11 @@ export function SummaryComposer({ sessionId, onClose }: { sessionId: string; onC
     return () => { active = false; };
   }, [targetDocumentId]);
 
-  useEffect(() => window.synapse.summaries.onActivity((activity) => {
-    if (activity.sessionId === sessionId) setGenerationActivity(activity.message);
-  }), [sessionId]);
-
   const turns = conversation?.turns ?? [];
   const destinationInvalid = destinationMode === "new" ? !profileId : !targetDocumentId;
   const notesInvalid = destinationMode === "new" && syncNotes && !notesFolder.trim();
   const generate = async () => {
     if (selected.size === 0 || !settings || destinationInvalid || notesInvalid) return;
-    setGenerationActivity("正在准备整理任务…");
     draft.beginGeneration();
     try {
       const result = await window.synapse.summaries.generate({
@@ -88,7 +82,7 @@ export function SummaryComposer({ sessionId, onClose }: { sessionId: string; onC
           : { kind: "existing", targetDocumentId },
       });
       draft.acceptGenerated(result);
-    } catch (reason) { setGenerationActivity(""); draft.fail(reason); }
+    } catch (reason) { draft.fail(reason); }
   };
   const busy = ["generating", "saving", "finalizing"].includes(draft.state.phase);
   const finalized = draft.state.phase === "final";
@@ -110,18 +104,9 @@ export function SummaryComposer({ sessionId, onClose }: { sessionId: string; onC
           {syncNotes && <NotesTargetPicker targets={notesTargets} account={notesAccount} folder={notesFolder} onAccountChange={setNotesAccount} onFolderChange={setNotesFolder} />}
         </> : <ExistingTargetPicker query={targetQuery} onQueryChange={setTargetQuery} items={targetItems} selectedId={targetDocumentId} onSelect={setTargetDocumentId} detail={targetDetail} />}
         <div className="source-count"><strong>{selected.size}</strong><span>个 turns 将作为事实来源</span></div>
-        {draft.state.phase === "generating" && <GenerationActivity message={generationActivity || "正在准备整理任务…"} />}
         <button className="primary wide" disabled={busy || !conversation || selected.size === 0 || destinationInvalid || notesInvalid} onClick={generate}>{draft.state.phase === "generating" ? <LoaderCircle className="spin" size={17} /> : <Sparkles size={17} />}{destinationMode === "existing" ? "整理到已有内容" : "总结"}</button>
       </aside>
     </div> : <DraftWorkspace state={draft.state} busy={busy} finalized={finalized} onEdit={draft.edit} onPreview={draft.setPreview} onSave={() => void draft.save()} onFinalize={() => void draft.finalize()} />}
-  </div>;
-}
-
-function GenerationActivity({ message }: { message: string }) {
-  return <div className="generation-activity" role="status" aria-live="polite" aria-atomic="true">
-    <span className="activity-dot" aria-hidden="true" />
-    <strong>CODEX</strong>
-    <span title={message}>{message}</span>
   </div>;
 }
 

@@ -5,7 +5,6 @@ import type {
   AppServerRuntimeStatusProvider,
   HookTrustGateway,
   HookTrustState,
-  SummaryAgentActivity,
   SummaryAgentGateway,
   SummaryAgentRequest,
 } from "@application/ports";
@@ -53,8 +52,8 @@ export class LazyCodexAppServerRuntime implements
   start(): void { void this.ensureInitialized(); }
   current(): Promise<AppServerRuntimeStatus> { return Promise.resolve(this.status); }
 
-  async generate(request: SummaryAgentRequest, onActivity?: (activity: SummaryAgentActivity) => void): Promise<GeneratedSummary> {
-    return (await this.requireAdapters()).agent.generate(request, onActivity);
+  async generate(request: SummaryAgentRequest): Promise<GeneratedSummary> {
+    return (await this.requireAdapters()).agent.generate(request);
   }
 
   async cancel(jobId: string): Promise<void> {

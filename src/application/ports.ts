@@ -93,12 +93,8 @@ export type SummaryAgentRequest = SummaryAgentRequestBase & ({
   readonly target: { readonly versionId: string; readonly content: SummaryContent };
 });
 
-export interface SummaryAgentActivity {
-  readonly message: string;
-}
-
 export interface SummaryAgentGateway {
-  generate(request: SummaryAgentRequest, onActivity?: (activity: SummaryAgentActivity) => void): Promise<GeneratedSummary>;
+  generate(request: SummaryAgentRequest): Promise<GeneratedSummary>;
   cancel(jobId: string): Promise<void>;
   listModels(): Promise<readonly AgentModel[]>;
 }

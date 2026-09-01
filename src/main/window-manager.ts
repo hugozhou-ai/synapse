@@ -2,7 +2,6 @@ import { BrowserWindow, Menu, Tray, app, nativeImage, screen } from "electron";
 import { join } from "node:path";
 import type { HookManagementService } from "@application/hook-management";
 import type { SettingsApplicationService } from "@application/query-services";
-import type { SummaryGenerationActivityView } from "@application/contracts";
 import type { Logger } from "@shared/logger";
 import { resolveWidgetBounds, WIDGET_COLLAPSED_SIZE, type WidgetBounds } from "@shared/widget-layout";
 import { resolveRendererUrl } from "./renderer-url";
@@ -83,10 +82,6 @@ export class ElectronWindowManager {
 
   broadcastSessionsChanged(): void {
     for (const window of [this.widget, this.workspace]) if (window && !window.isDestroyed()) window.webContents.send("synapse:sessions-changed");
-  }
-
-  broadcastSummaryActivity(activity: SummaryGenerationActivityView): void {
-    if (this.workspace && !this.workspace.isDestroyed()) this.workspace.webContents.send("synapse:summary-activity", activity);
   }
 
   resizeWidget(size: WidgetBounds): void {
