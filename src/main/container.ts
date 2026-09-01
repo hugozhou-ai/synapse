@@ -4,7 +4,7 @@ import type { App } from "electron";
 import { CodexHookManagementService, type HookManagementService } from "@application/hook-management";
 import { PersistentSettingsApplicationService, RepositoryProfileApplicationService, RepositorySessionQueryService, RepositorySummaryQueryService, SystemExportApplicationService, type ExportApplicationService, type ProfileApplicationService, type SessionQueryService, type SettingsApplicationService, type SummaryQueryService } from "@application/query-services";
 import { HookBasedSessionAwarenessService, type SessionAwarenessService } from "@application/session-services";
-import { OutboxSummaryPublicationService, ProfileDrivenSummaryGenerationService, TransactionalSummaryDeletionService, VersionedSummaryFinalizationService, type SummaryDeletionService, type SummaryFinalizationService, type SummaryGenerationService, type SummaryPublicationService } from "@application/summary-services";
+import { DestinationAwareSummaryGenerationService, OutboxSummaryPublicationService, TransactionalSummaryDeletionService, VersionedSummaryFinalizationService, type SummaryDeletionService, type SummaryFinalizationService, type SummaryGenerationService, type SummaryPublicationService } from "@application/summary-services";
 import { ArbitraryTurnSelectionService, DefaultSessionLifecycleService, NormalizedTurnSummaryContextService } from "@domain/services";
 import { appServerAgentRuntimeDirectory, LazyCodexAppServerRuntime } from "@infrastructure/app-server/runtime";
 import { ElectronExportGateway } from "@infrastructure/electron/export-gateway";
@@ -69,11 +69,11 @@ export class ElectronApplicationContainer {
     const settingsValue = await settingsRepository.read();
     const appServer = new LazyCodexAppServerRuntime(settingsValue.codexBinaryPath, supportDirectory, logger);
     appServer.start();
-    const summaryGeneration = new ProfileDrivenSummaryGenerationService(
+    const summaryGeneration = new DestinationAwareSummaryGenerationService(
       new ArbitraryTurnSelectionService(), new NormalizedTurnSummaryContextService(new NodeContentHashService()),
       appServer, profiles, summaries, sessions, jobs, unitOfWork, clock, ids, onSessionsChanged,
     );
-    const finalization = new VersionedSummaryFinalizationService(summaries, sessions, outbox, unitOfWork, clock, ids);
+    const finalization = new VersionedSummaryFinalizationService(summaries, sessions, outbox, publications, unitOfWork, clock, ids);
     const notesScript = resourcePath(app, "apple-notes-publisher.jxa");
     const notes = new AppleNotesSummaryPublisher(notesScript, logger);
     const publication = new OutboxSummaryPublicationService(summaries, publications, notes, clock, outbox);
@@ -93,7 +93,7 @@ export class ElectronApplicationContainer {
     const services = {
       sessionAwareness: awareness,
       sessionQueries: new RepositorySessionQueryService(sessions, clock, summaries, jobs),
-      summaryQueries: new RepositorySummaryQueryService(summaries),
+      summaryQueries: new RepositorySummaryQueryService(summaries, publications),
       summaryGeneration,
       summaryDeletion: new TransactionalSummaryDeletionService(summaries, sessions, outbox, unitOfWork),
       summaryFinalization: finalization,

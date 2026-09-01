@@ -10,9 +10,9 @@ describe("HistoryPage", () => {
   it("requires an inline confirmation before deleting the selected summary", async () => {
     const remove = vi.fn().mockResolvedValue(undefined);
     const detail: SummaryDetailView = {
-      id: "doc", sessionId: "session", profileId: "profile", selectedTurnIds: ["turn"], publicationStatus: "not-requested",
-      currentVersion: { id: "version", kind: "agent-draft", content: { title: "Summary title", abstract: "Abstract", bodyMarkdown: "Body", tags: [] }, createdAt: "2026-01-01T00:00:00.000Z" },
-      versions: [{ id: "version", kind: "agent-draft", createdAt: "2026-01-01T00:00:00.000Z" }],
+      id: "doc", publicationStatus: "not-requested", notesLinked: false,
+      currentVersion: { id: "version", kind: "agent-draft", generationMode: "new", sourceSessionId: "session", sourceTurnIds: ["turn"], baseVersionId: null, content: { title: "Summary title", abstract: "Abstract", bodyMarkdown: "Body", tags: [] }, createdAt: "2026-01-01T00:00:00.000Z" },
+      versions: [{ id: "version", kind: "agent-draft", generationMode: "new", sourceSessionId: "session", sourceTurnIds: ["turn"], baseVersionId: null, createdAt: "2026-01-01T00:00:00.000Z" }],
     };
     Object.defineProperty(window, "synapse", { configurable: true, value: {
       profiles: { list: vi.fn().mockResolvedValue([]) },

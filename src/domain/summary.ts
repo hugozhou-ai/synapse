@@ -2,6 +2,7 @@ import { DomainError } from "./shared";
 
 export type SummaryProfileKind = "template" | "systemPrompt";
 export type SummaryVersionKind = "agent-draft" | "edited-draft" | "final";
+export type SummaryGenerationMode = "new" | "merge";
 export type PublicationStatus = "not-requested" | "pending" | "published" | "failed";
 
 export class TurnSelection {
@@ -35,8 +36,8 @@ export interface SummaryContent {
 }
 
 export class SourceRevision {
-  constructor(readonly turnIds: readonly string[], readonly contentHash: string) {
-    if (turnIds.length === 0 || !contentHash) throw new DomainError("INVALID_SOURCE_REVISION", "Source revision is incomplete.");
+  constructor(readonly sessionId: string, readonly turnIds: readonly string[], readonly contentHash: string) {
+    if (!sessionId || turnIds.length === 0 || !contentHash) throw new DomainError("INVALID_SOURCE_REVISION", "Source revision is incomplete.");
   }
 }
 
@@ -51,6 +52,8 @@ export interface SummaryVersionProps {
   readonly documentId: string;
   readonly sequence: number;
   readonly kind: SummaryVersionKind;
+  readonly generationMode: SummaryGenerationMode;
+  readonly baseVersionId: string | null;
   readonly content: SummaryContent;
   readonly sourceRevision: SourceRevision;
   readonly model: string | null;
@@ -93,25 +96,15 @@ export class SummaryDocumentAggregate {
     return this.props.versions.find((version) => version.props.id === this.props.currentVersionId) ?? null;
   }
 
+  version(id: string): SummaryVersion | null {
+    return this.props.versions.find((version) => version.props.id === id) ?? null;
+  }
+
   addDraft(version: SummaryVersion): void {
     if (version.isFinal) throw new DomainError("DRAFT_EXPECTED", "A final version cannot be added as a draft.");
     this.assertVersion(version);
     this.props = {
       ...this.props,
-      versions: [...this.props.versions, version],
-      currentVersionId: version.props.id,
-      updatedAt: version.props.createdAt,
-    };
-  }
-
-  addRegeneratedDraft(version: SummaryVersion, profileId: string, selection: TurnSelection): void {
-    if (!profileId) throw new DomainError("PROFILE_REQUIRED", "A regenerated summary requires a profile.");
-    if (version.isFinal) throw new DomainError("DRAFT_EXPECTED", "A final version cannot be added as a regenerated draft.");
-    this.assertVersion(version);
-    this.props = {
-      ...this.props,
-      profileId,
-      selection,
       versions: [...this.props.versions, version],
       currentVersionId: version.props.id,
       updatedAt: version.props.createdAt,

@@ -1,5 +1,5 @@
 import { SummaryProfile } from "@domain/summary";
-import type { AgentModel, ApplicationSettings, ApplicationSettingsUpdate, AppServerRuntimeStatus, AppServerRuntimeStatusProvider, Clock, CodexSessionRepository, ExportGateway, IdGenerator, NotesTargetGateway, SettingsRepository, SummaryAgentGateway, SummaryDocumentRepository, SummaryJobRepository, SummaryProfileRepository, SummarySearchCriteria, SummarySearchResult, UnitOfWork } from "./ports";
+import type { AgentModel, ApplicationSettings, ApplicationSettingsUpdate, AppServerRuntimeStatus, AppServerRuntimeStatusProvider, Clock, CodexSessionRepository, ExportGateway, IdGenerator, NotesTargetGateway, PublicationRepository, SettingsRepository, SummaryAgentGateway, SummaryDocumentRepository, SummaryJobRepository, SummaryProfileRepository, SummarySearchCriteria, SummarySearchResult, UnitOfWork } from "./ports";
 import type { ConversationTurnsView, NotesTargetsView, SaveProfileCommand, SummaryDetailView, SummaryProfileView, WidgetSessionView } from "./contracts";
 import { DomainError } from "@domain/shared";
 
@@ -63,21 +63,28 @@ export interface SummaryQueryService {
 }
 
 export class RepositorySummaryQueryService implements SummaryQueryService {
-  constructor(private readonly summaries: SummaryDocumentRepository) {}
+  constructor(private readonly summaries: SummaryDocumentRepository, private readonly publications: PublicationRepository) {}
   search(query: SummarySearchCriteria): Promise<SummarySearchResult> { return this.summaries.search(query); }
 
   async getDocument(documentId: string): Promise<SummaryDetailView> {
     const document = await this.summaries.findById(documentId);
     if (!document) throw new DomainError("SUMMARY_NOT_FOUND", "Summary document does not exist.");
     const current = document.currentVersion;
+    const publication = await this.publications.find(document.id, "apple-notes");
     return {
       id: document.id,
-      sessionId: document.snapshot.sessionId,
-      profileId: document.snapshot.profileId,
-      selectedTurnIds: document.snapshot.selection.turnIds,
       publicationStatus: document.snapshot.publicationStatus,
-      currentVersion: current ? { id: current.props.id, kind: current.props.kind, content: current.props.content, createdAt: current.props.createdAt } : null,
-      versions: document.snapshot.versions.map((version) => ({ id: version.props.id, kind: version.props.kind, createdAt: version.props.createdAt })),
+      notesLinked: Boolean(publication?.externalId),
+      currentVersion: current ? {
+        id: current.props.id, kind: current.props.kind, generationMode: current.props.generationMode,
+        sourceSessionId: current.props.sourceRevision.sessionId, sourceTurnIds: current.props.sourceRevision.turnIds,
+        baseVersionId: current.props.baseVersionId, content: current.props.content, createdAt: current.props.createdAt,
+      } : null,
+      versions: document.snapshot.versions.map((version) => ({
+        id: version.props.id, kind: version.props.kind, generationMode: version.props.generationMode,
+        sourceSessionId: version.props.sourceRevision.sessionId, sourceTurnIds: version.props.sourceRevision.turnIds,
+        baseVersionId: version.props.baseVersionId, createdAt: version.props.createdAt,
+      })),
     };
   }
 }

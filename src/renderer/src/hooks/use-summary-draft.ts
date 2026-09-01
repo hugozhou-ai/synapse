@@ -48,6 +48,7 @@ export function useSummaryDraft() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const editRevision = useRef(0);
   const pendingSave = useRef<Promise<void>>(Promise.resolve());
+  const latestDraft = useRef<SummaryDraft | null>(null);
 
   useEffect(() => {
     if (!state.dirty || !state.draft || !state.content || state.phase === "final") return;
@@ -56,8 +57,8 @@ export function useSummaryDraft() {
     const content = state.content;
     const timer = window.setTimeout(() => {
       dispatch({ type: "auto-save-started" });
-      const operation = window.synapse.summaries.updateDraft({ documentId: draft.documentId, content })
-        .then((next) => dispatch({ type: "auto-save-completed", draft: next, clean: editRevision.current === revision }))
+      const operation = window.synapse.summaries.updateDraft({ documentId: draft.documentId, expectedVersionId: draft.versionId, content })
+        .then((next) => { latestDraft.current = next; dispatch({ type: "auto-save-completed", draft: next, clean: editRevision.current === revision }); })
         .catch((reason) => dispatch({ type: "failed", message: messageOf(reason) }));
       pendingSave.current = operation;
     }, 800);
@@ -70,16 +71,19 @@ export function useSummaryDraft() {
     editRevision.current += 1; dispatch({ type: "save-started" });
     try {
       await pendingSave.current;
-      const next = await window.synapse.summaries.updateDraft({ documentId: state.draft.documentId, content: state.content });
+      const current = latestDraft.current ?? state.draft;
+      const next = await window.synapse.summaries.updateDraft({ documentId: current.documentId, expectedVersionId: current.versionId, content: state.content });
+      latestDraft.current = next;
       dispatch({ type: "save-completed", draft: next });
     } catch (reason) { dispatch({ type: "failed", message: messageOf(reason), dirty: true }); }
   };
-  const finalize = async (syncToNotes: boolean) => {
+  const finalize = async () => {
     if (!state.draft || !state.content) return;
     editRevision.current += 1; dispatch({ type: "finalize-started" });
     try {
       await pendingSave.current;
-      await window.synapse.summaries.finalize({ documentId: state.draft.documentId, content: state.content, syncToNotes });
+      const current = latestDraft.current ?? state.draft;
+      await window.synapse.summaries.finalize({ documentId: current.documentId, expectedVersionId: current.versionId, content: state.content });
       dispatch({ type: "finalized" });
     } catch (reason) { dispatch({ type: "failed", message: messageOf(reason), dirty: true }); }
   };
@@ -87,7 +91,7 @@ export function useSummaryDraft() {
   return {
     state,
     beginGeneration: () => dispatch({ type: "generation-started" }),
-    acceptGenerated: (draft: SummaryDraft) => dispatch({ type: "generation-completed", draft }),
+    acceptGenerated: (draft: SummaryDraft) => { latestDraft.current = draft; dispatch({ type: "generation-completed", draft }); },
     fail: (reason: unknown) => dispatch({ type: "failed", message: messageOf(reason) }),
     setPreview: (preview: boolean) => dispatch({ type: "preview-changed", preview }),
     edit,

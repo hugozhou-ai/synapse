@@ -228,6 +228,38 @@ export class NodeSqliteSynapseDatabase implements SynapseDatabase {
         this.connection.exec("PRAGMA user_version = 3");
       });
     }
+    if (version < 4) {
+      this.migrateTransaction(() => {
+        if (this.tableExists("summary_versions")) {
+          this.connection.exec(`
+            ALTER TABLE summary_versions ADD COLUMN source_session_id TEXT REFERENCES codex_sessions(id);
+            ALTER TABLE summary_versions ADD COLUMN generation_mode TEXT NOT NULL DEFAULT 'new' CHECK(generation_mode IN ('new','merge'));
+            ALTER TABLE summary_versions ADD COLUMN base_version_id TEXT;
+            UPDATE summary_versions
+            SET source_session_id = (SELECT session_id FROM summary_documents WHERE summary_documents.id = summary_versions.document_id);
+            CREATE INDEX idx_summary_versions_source_session ON summary_versions(source_session_id, created_at DESC);
+          `);
+        }
+        if (this.tableExists("summary_jobs")) {
+          this.connection.exec(`
+            ALTER TABLE summary_jobs ADD COLUMN source_session_id TEXT REFERENCES codex_sessions(id);
+            ALTER TABLE summary_jobs ADD COLUMN generation_mode TEXT NOT NULL DEFAULT 'new' CHECK(generation_mode IN ('new','merge'));
+            ALTER TABLE summary_jobs ADD COLUMN base_version_id TEXT;
+            UPDATE summary_jobs
+            SET source_session_id = (SELECT session_id FROM summary_documents WHERE summary_documents.id = summary_jobs.document_id);
+            CREATE INDEX idx_summary_jobs_source_status ON summary_jobs(source_session_id, status, created_at DESC);
+            CREATE INDEX idx_summary_jobs_document_status ON summary_jobs(document_id, status, created_at DESC);
+          `);
+        }
+        const now = new Date().toISOString();
+        this.connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (4, ?)").run(now);
+        this.connection.exec("PRAGMA user_version = 4");
+      });
+    }
+  }
+
+  private tableExists(name: string): boolean {
+    return this.connection.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name) !== undefined;
   }
 
   private migrateTransaction(operation: () => void): void {

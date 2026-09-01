@@ -12,8 +12,12 @@ const idSchema = z.string().min(1);
 const summaryContentSchema = z.object({ title: z.string().min(1), abstract: z.string(), bodyMarkdown: z.string(), tags: z.array(z.string()) });
 const searchSchema = z.object({ text: z.string().optional(), cwd: z.string().optional(), profileId: z.string().optional(), status: z.string().optional(), from: z.string().optional(), to: z.string().optional(), limit: z.number().int().min(1).max(200), offset: z.number().int().min(0) });
 const publicationTargetSchema = z.object({ account: z.string().nullable(), folder: z.string().min(1) }).nullable();
-const generateSchema = z.object({ sessionId: idSchema, selectedTurnIds: z.array(idSchema).min(1), profileId: idSchema, model: z.string().nullable(), syncToNotes: z.boolean(), publicationTarget: publicationTargetSchema });
-const regenerateSchema = z.object({ documentId: idSchema, selectedTurnIds: z.array(idSchema).min(1), profileId: idSchema, model: z.string().nullable() });
+const destinationSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("new"), profileId: idSchema, publicationTarget: publicationTargetSchema }).strict(),
+  z.object({ kind: z.literal("existing"), targetDocumentId: idSchema }).strict(),
+]);
+const generateSchema = z.object({ sessionId: idSchema, selectedTurnIds: z.array(idSchema).min(1), model: z.string().nullable(), destination: destinationSchema }).strict();
+const regenerateSchema = z.object({ documentId: idSchema, model: z.string().nullable() }).strict();
 const settingsSchema = z.object({
   codexBinaryPath: z.string().nullable(), summaryModel: z.string().nullable(), syncNotesByDefault: z.boolean(),
   notesAccount: z.string().nullable(), notesFolder: z.string().min(1), widgetVisible: z.boolean(),
@@ -33,11 +37,14 @@ export class ElectronIpcController {
     this.handle("sessions:turns", idSchema, (id) => this.container.sessionQueries.getConversationTurns(id));
     this.handle("sessions:ignore", idSchema, async (id) => { await this.container.sessionAwareness.ignore(id); this.windows.broadcastSessionsChanged(); });
     this.handle("summaries:generate", generateSchema, async (value) => {
-      return this.container.summaryGeneration.generateDraft({ ...value, publicationTarget: value.publicationTarget ? new PublicationTarget(value.publicationTarget.account, value.publicationTarget.folder) : null });
+      const destination = value.destination.kind === "new"
+        ? { ...value.destination, publicationTarget: value.destination.publicationTarget ? new PublicationTarget(value.destination.publicationTarget.account, value.destination.publicationTarget.folder) : null }
+        : value.destination;
+      return this.container.summaryGeneration.generateDraft({ ...value, destination });
     });
     this.handle("summaries:regenerate", regenerateSchema, (value) => this.container.summaryGeneration.regenerate(value));
-    this.handle("summaries:update", z.object({ documentId: idSchema, content: summaryContentSchema }), (value) => this.container.summaryFinalization.updateDraft(value));
-    this.handle("summaries:finalize", z.object({ documentId: idSchema, content: summaryContentSchema, syncToNotes: z.boolean() }), async (value) => {
+    this.handle("summaries:update", z.object({ documentId: idSchema, expectedVersionId: idSchema, content: summaryContentSchema }).strict(), (value) => this.container.summaryFinalization.updateDraft(value));
+    this.handle("summaries:finalize", z.object({ documentId: idSchema, expectedVersionId: idSchema, content: summaryContentSchema }).strict(), async (value) => {
       const version = await this.container.summaryFinalization.finalize(value); this.windows.broadcastSessionsChanged(); return version.props;
     });
     this.handle("summaries:search", searchSchema, (value) => this.container.summaryQueries.search(compactObject<SummarySearchCriteria>(value)));

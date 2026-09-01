@@ -30,7 +30,7 @@ Edit and finalize → History / Markdown / JSON / Apple Notes
 
 1. Synapse shows active and pending Codex tasks in a global desktop widget.
 2. After a task stops, select any combination of turns to use as the factual source.
-3. Codex App Server generates a structured draft whose title, abstract, tags, and Markdown body remain editable and previewable.
+3. Create a structured summary or merge the selected turns into an existing SQLite summary while preserving its structure, style, and level of detail; the title, abstract, tags, and Markdown body remain editable and previewable.
 4. Finalized summaries retain immutable version history and can be exported or synchronized to Apple Notes.
 
 ## Features
@@ -39,8 +39,9 @@ Edit and finalize → History / Markdown / JSON / Apple Notes
 - **Reliable Hook ingestion**: Observes `SessionStart`, `UserPromptSubmit`, and `Stop`; writes events to a `0600` offline spool when the Unix socket is unavailable and replays them after recovery.
 - **Precise turn selection**: Supports arbitrary multi-selection, Shift-range selection, and drag selection after a roughly 350 ms long press.
 - **Structured summaries**: Produces a title, abstract, Markdown body, and tags through a fixed JSON Schema; long conversations are chunked at turn boundaries without silently dropping sources.
+- **Existing-content merge**: Searches the complete local archive and folds verified facts into the full target document. Merge mode does not use a summary profile and rejects stale base versions instead of overwriting concurrent edits.
 - **Traceable history**: Uses SQLite WAL storage, immutable versions, FTS5 full-text search, and Markdown / JSON export.
-- **Apple Notes sync**: Targets a selected account and folder, updates the same note for the same summary, and leaves failed publications available for explicit retry.
+- **Apple Notes sync**: New summaries can select an account and folder. A merged document updates its existing bound note only after finalization, and failed publications remain available for explicit retry.
 - **Least-privilege execution**: Runs the summary agent in a read-only sandbox and an isolated empty directory, with explicit instructions not to call tools, read or write files, or access the network.
 
 ## Requirements
@@ -69,7 +70,7 @@ npm run dev
 2. Select **Install Hook**. Synapse backs up and atomically merges `~/.codex/hooks.json`, then enables the canonical `hooks = true` entry under `[features]`.
 3. Review the complete commands and all three Hook events in the security confirmation, then select **Trust and Enable**. You can also enter `/hooks` in Codex to inspect their status.
 4. Start or resume a Codex task. The widget should show it as active after a prompt is submitted; when the task stops, its card moves to the top and exposes the summary action.
-5. Choose turns, a summary profile, and a model to generate a draft. After editing and finalizing it, the result can be searched, regenerated, or exported from history.
+5. Choose turns, then either use a summary profile to create new content or search and merge into existing content without a profile. After editing and finalizing it, the result can be searched, regenerated, or exported from history.
 
 To use Apple Notes, choose a target account and folder in Settings, then allow Synapse to control Notes when macOS displays its first permission prompt.
 
@@ -78,6 +79,8 @@ Uninstalling the Hook removes only the Synapse handlers recorded in its manifest
 ## Local data and privacy
 
 Synapse stores the complete prompt and assistant content supplied by Hooks, minimal event metadata, and summary versions on the local machine for task tracking and later summarization. Runtime logs do not contain prompts, conversation bodies, or summary bodies.
+
+Markdown stored in SQLite is the sole source of truth for summary content. Apple Notes is a one-to-one, one-way published copy; Synapse does not read or merge edits made directly in Notes.
 
 | Data | Default location |
 | --- | --- |

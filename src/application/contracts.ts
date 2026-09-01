@@ -16,19 +16,25 @@ export interface SessionTransitionResult {
 
 export interface ReplayResult { readonly accepted: number; readonly duplicates: number; readonly failed: number; }
 
-export interface GenerateSummaryCommand {
+interface GenerateSummaryCommandBase {
   readonly sessionId: string;
   readonly selectedTurnIds: readonly string[];
-  readonly profileId: string;
   readonly model: string | null;
-  readonly syncToNotes: boolean;
-  readonly publicationTarget: PublicationTargetInput | null;
 }
+
+export type GenerateSummaryCommand = GenerateSummaryCommandBase & {
+  readonly destination: {
+    readonly kind: "new";
+    readonly profileId: string;
+    readonly publicationTarget: PublicationTargetInput | null;
+  } | {
+    readonly kind: "existing";
+    readonly targetDocumentId: string;
+  };
+};
 
 export interface RegenerateSummaryCommand {
   readonly documentId: string;
-  readonly selectedTurnIds: readonly string[];
-  readonly profileId: string;
   readonly model: string | null;
 }
 
@@ -38,16 +44,18 @@ export interface SummaryDraft {
   readonly content: SummaryContentView;
 }
 
-export interface UpdateDraftCommand { readonly documentId: string; readonly content: SummaryContentView; }
-export interface FinalizeSummaryCommand { readonly documentId: string; readonly content: SummaryContentView; readonly syncToNotes: boolean; }
+export interface UpdateDraftCommand { readonly documentId: string; readonly expectedVersionId: string; readonly content: SummaryContentView; }
+export interface FinalizeSummaryCommand { readonly documentId: string; readonly expectedVersionId: string; readonly content: SummaryContentView; }
 
 export interface FinalizedSummaryView {
   readonly id: string;
   readonly documentId: string;
   readonly sequence: number;
   readonly kind: string;
+  readonly generationMode: "new" | "merge";
+  readonly baseVersionId: string | null;
   readonly content: SummaryContentView;
-  readonly sourceRevision: { readonly turnIds: readonly string[]; readonly contentHash: string };
+  readonly sourceRevision: { readonly sessionId: string; readonly turnIds: readonly string[]; readonly contentHash: string };
   readonly model: string | null;
   readonly createdAt: string;
 }
@@ -89,17 +97,27 @@ export interface ConversationTurnsView {
 
 export interface SummaryDetailView {
   readonly id: string;
-  readonly sessionId: string;
-  readonly profileId: string;
-  readonly selectedTurnIds: readonly string[];
   readonly publicationStatus: string;
+  readonly notesLinked: boolean;
   readonly currentVersion: null | {
     readonly id: string;
     readonly kind: string;
+    readonly generationMode: "new" | "merge";
+    readonly sourceSessionId: string;
+    readonly sourceTurnIds: readonly string[];
+    readonly baseVersionId: string | null;
     readonly content: SummaryContentView;
     readonly createdAt: string;
   };
-  readonly versions: readonly { id: string; kind: string; createdAt: string }[];
+  readonly versions: readonly {
+    id: string;
+    kind: string;
+    generationMode: "new" | "merge";
+    sourceSessionId: string;
+    sourceTurnIds: readonly string[];
+    baseVersionId: string | null;
+    createdAt: string;
+  }[];
 }
 
 export interface SummaryProfileView {

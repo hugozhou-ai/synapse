@@ -16,7 +16,7 @@ describe("useSummaryDraft", () => {
     fireEvent.click(screen.getByRole("button", { name: "生成完成" }));
     fireEvent.change(screen.getByLabelText("标题"), { target: { value: "Edited" } });
     await act(async () => { vi.advanceTimersByTime(800); await Promise.resolve(); });
-    expect(updateDraft).toHaveBeenCalledWith({ documentId: "doc", content: { ...content, title: "Edited" } });
+    expect(updateDraft).toHaveBeenCalledWith({ documentId: "doc", expectedVersionId: "draft-1", content: { ...content, title: "Edited" } });
   });
 
   it("waits for an in-flight autosave before finalizing", async () => {
@@ -29,7 +29,7 @@ describe("useSummaryDraft", () => {
     fireEvent.click(screen.getByRole("button", { name: "完成" }));
     expect(finalize).not.toHaveBeenCalled();
     await act(async () => { resolveSave({ ...generated, versionId: "draft-2", content: { ...content, title: "Edited" } }); await Promise.resolve(); });
-    expect(finalize).toHaveBeenCalledWith({ documentId: "doc", content: { ...content, title: "Edited" }, syncToNotes: false });
+    expect(finalize).toHaveBeenCalledWith({ documentId: "doc", expectedVersionId: "draft-2", content: { ...content, title: "Edited" } });
   });
 });
 
@@ -38,7 +38,7 @@ function Harness() {
   return <div>
     <button onClick={() => summary.acceptGenerated(generated)}>生成完成</button>
     {summary.state.content && <label>标题<input aria-label="标题" value={summary.state.content.title} onChange={(event) => summary.edit({ ...summary.state.content!, title: event.target.value })} /></label>}
-    <button onClick={() => void summary.finalize(false)}>完成</button>
+    <button onClick={() => void summary.finalize()}>完成</button>
   </div>;
 }
 

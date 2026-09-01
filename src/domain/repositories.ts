@@ -28,6 +28,7 @@ export interface SummaryProfileRepository {
 export interface SummaryDocumentRepository {
   findById(id: string): Promise<SummaryDocumentAggregate | null>;
   findLatestBySessionId(sessionId: string): Promise<SummaryDocumentAggregate | null>;
+  hasFinalBySessionId(sessionId: string): Promise<boolean>;
   create(document: SummaryDocumentAggregate): Promise<void>;
   save(document: SummaryDocumentAggregate): Promise<void>;
   delete(id: string): Promise<void>;

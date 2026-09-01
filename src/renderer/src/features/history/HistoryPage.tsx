@@ -64,10 +64,10 @@ function HistoryDetail({ detail, onChanged, onDeleted, onError }: { detail: Summ
   const act = async (operation: () => Promise<unknown>) => { setBusy(true); try { await operation(); onChanged(); } catch (reason) { onError(messageOf(reason)); } finally { setBusy(false); } };
   const regenerate = () => act(async () => {
     const settings = await window.synapse.settings.read();
-    await window.synapse.summaries.regenerate({ documentId: detail.id, selectedTurnIds: detail.selectedTurnIds, profileId: detail.profileId, model: settings.summaryModel });
+    await window.synapse.summaries.regenerate({ documentId: detail.id, model: settings.summaryModel });
   });
-  const save = () => act(() => window.synapse.summaries.updateDraft({ documentId: detail.id, content }));
-  const finalize = () => act(() => window.synapse.summaries.finalize({ documentId: detail.id, content, syncToNotes: detail.publicationStatus !== "not-requested" }));
+  const save = () => act(() => window.synapse.summaries.updateDraft({ documentId: detail.id, expectedVersionId: current.id, content }));
+  const finalize = () => act(() => window.synapse.summaries.finalize({ documentId: detail.id, expectedVersionId: current.id, content }));
   const deleteSummary = async () => {
     if (!confirmingDelete) { setConfirmingDelete(true); return; }
     setBusy(true);
@@ -78,6 +78,6 @@ function HistoryDetail({ detail, onChanged, onDeleted, onError }: { detail: Summ
   return <>
     <div className="detail-actions"><button disabled={busy} onClick={() => { setConfirmingDelete(false); setEditing((value) => !value); }}><NotebookPen size={14} />{editing ? "预览" : "编辑"}</button><button disabled={busy} onClick={() => { setConfirmingDelete(false); void regenerate(); }}><RefreshCw size={14} />重新生成</button><button disabled={busy} onClick={() => { setConfirmingDelete(false); void window.synapse.export.markdown(detail.id); }}><FileDown size={14} />MD</button><button disabled={busy} onClick={() => { setConfirmingDelete(false); void window.synapse.export.json(detail.id); }}><FileDown size={14} />JSON</button>{detail.publicationStatus === "failed" && <button disabled={busy} onClick={() => { setConfirmingDelete(false); void window.synapse.summaries.retryNotes(detail.id); }}><RefreshCw size={14} />重试 Notes</button>}<button className="delete-summary-action" disabled={busy} title={confirmingDelete ? "永久删除本地总结；不会删除已同步的 Apple Notes 内容" : "删除总结"} onClick={() => void deleteSummary()}><Trash2 size={14} />{confirmingDelete ? "确认删除" : "删除"}</button></div>
     {editing ? <div className="editor-form history-editor"><label>标题<input value={content.title} onChange={(event) => setContent({ ...content, title: event.target.value })} /></label><label>摘要<textarea rows={3} value={content.abstract} onChange={(event) => setContent({ ...content, abstract: event.target.value })} /></label><label>标签<input value={content.tags.join(", ")} onChange={(event) => setContent({ ...content, tags: event.target.value.split(",").map((value) => value.trim()).filter(Boolean) })} /></label><label>正文<textarea className="markdown-editor" value={content.bodyMarkdown} onChange={(event) => setContent({ ...content, bodyMarkdown: event.target.value })} /></label><div className="row-actions"><button className="secondary" disabled={busy} onClick={save}>保存新草稿</button><button className="primary" disabled={busy} onClick={finalize}>确认新 final</button></div></div> : <article className="markdown-preview"><span className="version-pill">{current.kind}</span><h1>{current.content.title}</h1><p className="abstract">{current.content.abstract}</p><div className="tag-row">{current.content.tags.map((tag) => <span key={tag}>{tag}</span>)}</div><ReactMarkdown>{current.content.bodyMarkdown}</ReactMarkdown></article>}
-    <div className="version-history"><strong>版本历史</strong>{detail.versions.map((version) => <span key={version.id}>{version.kind} · {new Date(version.createdAt).toLocaleString()}</span>)}</div>
+    <div className="version-history"><strong>版本历史</strong>{detail.versions.map((version) => <span key={version.id}>{version.kind} · {version.generationMode === "merge" ? "融合" : "新建"} · {new Date(version.createdAt).toLocaleString()}</span>)}</div>
   </>;
 }

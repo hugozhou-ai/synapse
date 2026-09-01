@@ -4,6 +4,7 @@ import type { DomainEvent } from "@domain/shared";
 import type {
   PublicationTarget,
   SummaryDocumentAggregate,
+  SummaryContent,
   SummaryProfile,
   SummaryVersion,
   TurnSelection,
@@ -19,6 +20,9 @@ export interface SummaryDocumentRepository extends DomainSummaryDocumentReposito
 export interface SummaryJob {
   readonly id: string;
   readonly documentId: string;
+  readonly sourceSessionId: string;
+  readonly generationMode: "new" | "merge";
+  readonly baseVersionId: string | null;
   readonly status: "queued" | "running" | "succeeded" | "failed" | "canceled";
   readonly error: string | null;
   readonly coveredTurnIds: readonly string[];
@@ -31,6 +35,7 @@ export interface SummaryJobRepository {
   save(job: SummaryJob): Promise<void>;
   findById(id: string): Promise<SummaryJob | null>;
   findActiveBySessionId(sessionId: string): Promise<SummaryJob | null>;
+  findActiveByDocumentId(documentId: string): Promise<SummaryJob | null>;
   failActive(error: string, updatedAt: string): Promise<void>;
 }
 
@@ -74,12 +79,19 @@ export interface UnitOfWork {
   execute<T>(work: () => Promise<T>): Promise<T>;
 }
 
-export interface SummaryAgentRequest {
+interface SummaryAgentRequestBase {
   readonly jobId: string;
   readonly context: SummaryContext;
-  readonly profile: SummaryProfile;
   readonly model: string | null;
 }
+
+export type SummaryAgentRequest = SummaryAgentRequestBase & ({
+  readonly generationMode: "new";
+  readonly profile: SummaryProfile;
+} | {
+  readonly generationMode: "merge";
+  readonly target: { readonly versionId: string; readonly content: SummaryContent };
+});
 
 export interface SummaryAgentGateway {
   generate(request: SummaryAgentRequest): Promise<GeneratedSummary>;
@@ -141,6 +153,7 @@ export interface SummarySearchItem {
   readonly cwd: string;
   readonly profileId: string;
   readonly versionKind: string;
+  readonly notesLinked: boolean;
   readonly updatedAt: string;
 }
 

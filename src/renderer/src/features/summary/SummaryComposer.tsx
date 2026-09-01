@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { Check, LoaderCircle, NotebookPen, Sparkles, X } from "lucide-react";
-import type { ApplicationSettings } from "@application/ports";
-import type { ConversationTurnsView, NotesTargetsView, SummaryContentView, SummaryProfileView } from "@application/contracts";
+import { Check, FileText, LoaderCircle, NotebookPen, Search, Sparkles, X } from "lucide-react";
+import type { ApplicationSettings, SummarySearchItem } from "@application/ports";
+import type { ConversationTurnsView, NotesTargetsView, SummaryContentView, SummaryDetailView, SummaryProfileView } from "@application/contracts";
 import { ErrorBanner, PageHeader } from "../../components/common";
 import { NotesTargetPicker } from "../../components/NotesTargetPicker";
 import { Select } from "../../components/Select";
 import { useSummaryDraft } from "../../hooks/use-summary-draft";
-import { messageOf } from "../../lib/format";
+import { messageOf, shortPath } from "../../lib/format";
 import { TurnSelector } from "./TurnSelector";
 
 export function SummaryComposer({ sessionId, onClose }: { sessionId: string; onClose(): void }) {
@@ -15,11 +15,16 @@ export function SummaryComposer({ sessionId, onClose }: { sessionId: string; onC
   const [profiles, setProfiles] = useState<readonly SummaryProfileView[]>([]);
   const [settings, setSettings] = useState<ApplicationSettings | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [destinationMode, setDestinationMode] = useState<"new" | "existing">("new");
   const [profileId, setProfileId] = useState("");
   const [syncNotes, setSyncNotes] = useState(false);
   const [notesAccount, setNotesAccount] = useState("");
   const [notesFolder, setNotesFolder] = useState("Synapse");
   const [notesTargets, setNotesTargets] = useState<NotesTargetsView | null>(null);
+  const [targetQuery, setTargetQuery] = useState("");
+  const [targetItems, setTargetItems] = useState<readonly SummarySearchItem[]>([]);
+  const [targetDocumentId, setTargetDocumentId] = useState("");
+  const [targetDetail, setTargetDetail] = useState<SummaryDetailView | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const draft = useSummaryDraft();
   const loadConversation = useCallback(() => {
@@ -40,18 +45,41 @@ export function SummaryComposer({ sessionId, onClose }: { sessionId: string; onC
   }, [loadConversation]);
 
   useEffect(() => {
-    if (!syncNotes || notesTargets) return;
+    if (destinationMode !== "new" || !syncNotes || notesTargets) return;
     void window.synapse.settings.notesTargets().then(setNotesTargets).catch((reason) => setLoadError(`无法读取 Apple Notes 目标：${messageOf(reason)}`));
-  }, [notesTargets, syncNotes]);
+  }, [destinationMode, notesTargets, syncNotes]);
+
+  useEffect(() => {
+    if (destinationMode !== "existing") return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      void window.synapse.summaries.search({
+        ...(targetQuery.trim() ? { text: targetQuery.trim() } : {}), limit: 200, offset: 0,
+      }).then((result) => { if (active) setTargetItems(result.items); }).catch((reason) => { if (active) setLoadError(messageOf(reason)); });
+    }, 200);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [destinationMode, targetQuery]);
+
+  useEffect(() => {
+    if (!targetDocumentId) { setTargetDetail(null); return; }
+    let active = true;
+    setTargetDetail(null);
+    void window.synapse.summaries.get(targetDocumentId).then((detail) => { if (active) setTargetDetail(detail); }).catch((reason) => { if (active) setLoadError(messageOf(reason)); });
+    return () => { active = false; };
+  }, [targetDocumentId]);
 
   const turns = conversation?.turns ?? [];
+  const destinationInvalid = destinationMode === "new" ? !profileId : !targetDocumentId;
+  const notesInvalid = destinationMode === "new" && syncNotes && !notesFolder.trim();
   const generate = async () => {
-    if (!profileId || selected.size === 0 || !settings) return;
+    if (selected.size === 0 || !settings || destinationInvalid || notesInvalid) return;
     draft.beginGeneration();
     try {
       const result = await window.synapse.summaries.generate({
-        sessionId, selectedTurnIds: [...selected], profileId, model: settings.summaryModel,
-        syncToNotes: syncNotes, publicationTarget: syncNotes ? { account: notesAccount || null, folder: notesFolder } : null,
+        sessionId, selectedTurnIds: [...selected], model: settings.summaryModel,
+        destination: destinationMode === "new"
+          ? { kind: "new", profileId, publicationTarget: syncNotes ? { account: notesAccount || null, folder: notesFolder } : null }
+          : { kind: "existing", targetDocumentId },
       });
       draft.acceptGenerated(result);
     } catch (reason) { draft.fail(reason); }
@@ -67,14 +95,34 @@ export function SummaryComposer({ sessionId, onClose }: { sessionId: string; onC
       <section className="panel turns-panel"><div className="panel-head"><div><h2>选择 turns</h2><p>默认选中已完成 turn；失败或中断的 turn 需手动纳入。</p></div><div className="selection-actions"><button onClick={() => setSelected(new Set(turns.filter((turn) => turn.status !== "running").map((turn) => turn.id)))}>全选</button><button onClick={() => setSelected(new Set())}>取消</button></div></div>
         <TurnSelector turns={turns} selected={selected} onChange={setSelected} />
       </section>
-      <aside className="panel generation-panel"><h2>整理设置</h2><label>整理方案<Select ariaLabel="整理方案" value={profileId} onChange={setProfileId} options={profiles.map((profile) => ({ value: profile.id, label: profile.name }))} /></label>
-        <div className="profile-preview"><span>{profiles.find((profile) => profile.id === profileId)?.kind === "template" ? "Markdown 模板" : "系统提示词"}</span><p>{profiles.find((profile) => profile.id === profileId)?.instructions.slice(0, 240)}</p></div>
-        <label className="toggle-row"><input type="checkbox" checked={syncNotes} onChange={(event) => setSyncNotes(event.target.checked)} /><span className="toggle" /><div><strong>同步到 Apple Notes</strong><small>{notesFolder || "未选择文件夹"} · 仅 final 后执行</small></div></label>
-        {syncNotes && <NotesTargetPicker targets={notesTargets} account={notesAccount} folder={notesFolder} onAccountChange={setNotesAccount} onFolderChange={setNotesFolder} />}
+      <aside className="panel generation-panel"><h2>整理设置</h2>
+        <div className="destination-switch" role="tablist" aria-label="整理目标"><button role="tab" aria-selected={destinationMode === "new"} className={destinationMode === "new" ? "active" : ""} onClick={() => setDestinationMode("new")}><Sparkles size={14} />新内容</button><button role="tab" aria-selected={destinationMode === "existing"} className={destinationMode === "existing" ? "active" : ""} onClick={() => setDestinationMode("existing")}><FileText size={14} />已有内容</button></div>
+        {destinationMode === "new" ? <>
+          <label>整理方案<Select ariaLabel="整理方案" value={profileId} onChange={setProfileId} options={profiles.map((profile) => ({ value: profile.id, label: profile.name }))} /></label>
+          <div className="profile-preview"><span>{profiles.find((profile) => profile.id === profileId)?.kind === "template" ? "Markdown 模板" : "系统提示词"}</span><p>{profiles.find((profile) => profile.id === profileId)?.instructions.slice(0, 240)}</p></div>
+          <label className="toggle-row"><input type="checkbox" checked={syncNotes} onChange={(event) => setSyncNotes(event.target.checked)} /><span className="toggle" /><div><strong>同步到 Apple Notes</strong><small>{notesFolder || "未选择文件夹"} · 仅 final 后执行</small></div></label>
+          {syncNotes && <NotesTargetPicker targets={notesTargets} account={notesAccount} folder={notesFolder} onAccountChange={setNotesAccount} onFolderChange={setNotesFolder} />}
+        </> : <ExistingTargetPicker query={targetQuery} onQueryChange={setTargetQuery} items={targetItems} selectedId={targetDocumentId} onSelect={setTargetDocumentId} detail={targetDetail} />}
         <div className="source-count"><strong>{selected.size}</strong><span>个 turns 将作为事实来源</span></div>
-        <button className="primary wide" disabled={busy || !conversation || selected.size === 0 || !profileId || (syncNotes && !notesFolder.trim())} onClick={generate}>{draft.state.phase === "generating" ? <LoaderCircle className="spin" size={17} /> : <Sparkles size={17} />}总结</button>
+        <button className="primary wide" disabled={busy || !conversation || selected.size === 0 || destinationInvalid || notesInvalid} onClick={generate}>{draft.state.phase === "generating" ? <LoaderCircle className="spin" size={17} /> : <Sparkles size={17} />}{destinationMode === "existing" ? "整理到已有内容" : "总结"}</button>
       </aside>
-    </div> : <DraftWorkspace state={draft.state} busy={busy} finalized={finalized} onEdit={draft.edit} onPreview={draft.setPreview} onSave={() => void draft.save()} onFinalize={() => void draft.finalize(syncNotes)} />}
+    </div> : <DraftWorkspace state={draft.state} busy={busy} finalized={finalized} onEdit={draft.edit} onPreview={draft.setPreview} onSave={() => void draft.save()} onFinalize={() => void draft.finalize()} />}
+  </div>;
+}
+
+function ExistingTargetPicker({ query, onQueryChange, items, selectedId, onSelect, detail }: {
+  query: string;
+  onQueryChange(value: string): void;
+  items: readonly SummarySearchItem[];
+  selectedId: string;
+  onSelect(value: string): void;
+  detail: SummaryDetailView | null;
+}) {
+  return <div className="existing-target-picker">
+    <p className="target-guidance">将新事实融入 SQLite 中的完整已有内容；该模式不使用整理方案。</p>
+    <div className="target-search"><Search size={14} /><input aria-label="搜索已有内容" placeholder="搜索标题、正文、标签或项目…" value={query} onChange={(event) => onQueryChange(event.target.value)} /></div>
+    <div className="target-results">{items.map((item) => <button key={item.documentId} className={selectedId === item.documentId ? "active" : ""} onClick={() => onSelect(item.documentId)}><strong>{item.title}</strong><span>{shortPath(item.cwd)} · {item.versionKind} · {item.notesLinked ? "已绑定 Notes" : "仅本地"}</span><small>{item.abstract}</small></button>)}{items.length === 0 && <span className="target-empty">没有匹配的已有内容</span>}</div>
+    {detail?.currentVersion && <div className="target-preview"><div><strong>目标预览</strong><span>{detail.notesLinked ? "final 后自动更新原便签" : "无 Notes 绑定，只更新本地"}</span></div><article><h3>{detail.currentVersion.content.title}</h3><ReactMarkdown>{detail.currentVersion.content.bodyMarkdown}</ReactMarkdown></article></div>}
   </div>;
 }
 

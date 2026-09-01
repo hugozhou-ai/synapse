@@ -30,11 +30,39 @@ describe("App Server adapters", () => {
       subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); }, async close() {},
     };
     const gateway = new CodexAppServerSummaryAgentGateway(client, "/tmp/synapse-agent-test");
-    const result = await gateway.generate({ jobId: "job", context: { sourceTurnIds: ["turn"], sourceHash: "hash", chunks: [{ turnIds: ["turn"], content: "conversation" }] }, profile: new SummaryProfile("p", "Profile", "systemPrompt", "Summarize facts", true), model: "test-model" });
+    const result = await gateway.generate({ jobId: "job", generationMode: "new", context: { sourceTurnIds: ["turn"], sourceHash: "hash", chunks: [{ turnIds: ["turn"], content: "conversation" }] }, profile: new SummaryProfile("p", "Profile", "systemPrompt", "Summarize facts", true), model: "test-model" });
     expect(result.title).toBe("Title");
     expect(result.stages).toEqual([{ kind: "final", turnIds: ["turn"] }]);
     expect(requests.find((request) => request.method === "thread/start")?.params).toMatchObject({ approvalPolicy: "never", sandbox: "read-only", ephemeral: true });
     expect(requests.find((request) => request.method === "turn/start")?.params).toHaveProperty("outputSchema");
+  });
+
+  it("merges against the complete existing content without a summary profile", async () => {
+    const requests: Array<{ method: string; params: unknown }> = []; const listeners = new Set<(notification: CodexNotification) => void>();
+    const client: CodexAppServerClient = {
+      async connect() {},
+      async request<T>(method: string, params: unknown): Promise<T> {
+        requests.push({ method, params });
+        if (method === "thread/start") return { thread: { id: "merge-thread" } } as T;
+        if (method === "turn/start") {
+          for (const listener of listeners) listener({ method: "turn/completed", params: { threadId: "merge-thread", turn: { id: "merge-turn", status: "completed", items: [{ type: "agentMessage", text: JSON.stringify({ title: "Existing", abstract: "", bodyMarkdown: "# Existing\n\n## Added\n\nFact", tags: [] }) }] } } });
+          return { turn: { id: "merge-turn" } } as T;
+        }
+        return {} as T;
+      },
+      subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); }, async close() {},
+    };
+    const gateway = new CodexAppServerSummaryAgentGateway(client, "/tmp/synapse-agent-merge");
+    await gateway.generate({
+      jobId: "job", generationMode: "merge", model: null,
+      context: { sourceTurnIds: ["turn"], sourceHash: "hash", chunks: [{ turnIds: ["turn"], content: "new verified fact" }] },
+      target: { versionId: "base", content: { title: "Existing", abstract: "Short", bodyMarkdown: "# Existing\n\n## Stable\n\nKeep this.", tags: ["keep"] } },
+    });
+    const thread = requests.find((request) => request.method === "thread/start")?.params as { developerInstructions: string };
+    const turn = requests.find((request) => request.method === "turn/start")?.params as { input: Array<{ text: string }> };
+    expect(thread.developerInstructions).toContain("严禁长篇大论");
+    expect(turn.input[0]?.text).toContain("# Existing\\n\\n## Stable");
+    expect(turn.input[0]?.text).toContain("new verified fact");
   });
 
   it("resets the supervisor restart budget after a successful request", async () => {
@@ -94,7 +122,7 @@ describe("App Server adapters", () => {
       subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); }, async close() {},
     };
     const gateway = new CodexAppServerSummaryAgentGateway(client, "/tmp/synapse-agent-chunks");
-    const result = await gateway.generate({ jobId: "job", context: { sourceTurnIds: ["one", "two"], sourceHash: "hash", chunks: [{ turnIds: ["one"], content: "first" }, { turnIds: ["two"], content: "second" }] }, profile: new SummaryProfile("p", "Profile", "systemPrompt", "Summarize", true), model: null });
+    const result = await gateway.generate({ jobId: "job", generationMode: "new", context: { sourceTurnIds: ["one", "two"], sourceHash: "hash", chunks: [{ turnIds: ["one"], content: "first" }, { turnIds: ["two"], content: "second" }] }, profile: new SummaryProfile("p", "Profile", "systemPrompt", "Summarize", true), model: null });
     expect(result.stages).toEqual([{ kind: "chunk", turnIds: ["one"] }, { kind: "chunk", turnIds: ["two"] }, { kind: "final", turnIds: ["one", "two"] }]);
     expect(turns).toBe(3);
   });
@@ -145,7 +173,7 @@ describe("App Server adapters", () => {
       subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); }, async close() {},
     };
     const gateway = new CodexAppServerSummaryAgentGateway(client, "/tmp/synapse-agent-cancel");
-    const generation = gateway.generate({ jobId: "job", context: { sourceTurnIds: ["turn"], sourceHash: "hash", chunks: [{ turnIds: ["turn"], content: "content" }] }, profile: new SummaryProfile("p", "Profile", "systemPrompt", "Summarize", true), model: null });
+    const generation = gateway.generate({ jobId: "job", generationMode: "new", context: { sourceTurnIds: ["turn"], sourceHash: "hash", chunks: [{ turnIds: ["turn"], content: "content" }] }, profile: new SummaryProfile("p", "Profile", "systemPrompt", "Summarize", true), model: null });
     while (!requests.some((request) => request.method === "turn/start")) await new Promise((resolve) => setTimeout(resolve, 1));
     await Promise.resolve();
     await gateway.cancel("job");

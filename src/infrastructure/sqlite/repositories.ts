@@ -147,7 +147,18 @@ function mapProfile(row: Row): SummaryProfile {
 export class SqliteSummaryDocumentRepository implements SummaryDocumentRepository {
   constructor(private readonly db: SynapseDatabase) {}
   async findById(id: string): Promise<SummaryDocumentAggregate | null> { return this.db.execute(() => this.find("d.id = ?", id)); }
-  async findLatestBySessionId(id: string): Promise<SummaryDocumentAggregate | null> { return this.db.execute(() => this.find("d.session_id = ? AND d.current_version_id IS NOT NULL ORDER BY d.updated_at DESC", id)); }
+  async findLatestBySessionId(id: string): Promise<SummaryDocumentAggregate | null> {
+    return this.db.execute(() => {
+      const row = this.db.connection.prepare(`SELECT d.* FROM summary_documents d
+        JOIN summary_versions source ON source.document_id = d.id
+        WHERE source.source_session_id = ? AND d.current_version_id IS NOT NULL
+        ORDER BY d.updated_at DESC, source.created_at DESC LIMIT 1`).get(id) as Row | undefined;
+      return row ? this.mapDocument(row) : null;
+    });
+  }
+  async hasFinalBySessionId(id: string): Promise<boolean> {
+    return this.db.execute(() => this.db.connection.prepare("SELECT 1 FROM summary_versions WHERE source_session_id = ? AND kind = 'final' LIMIT 1").get(id) !== undefined);
+  }
 
   async create(document: SummaryDocumentAggregate): Promise<void> {
     await this.db.execute(() => {
@@ -186,7 +197,7 @@ export class SqliteSummaryDocumentRepository implements SummaryDocumentRepositor
   async search(input: SummarySearchCriteria): Promise<SummarySearchResult> {
     return this.db.execute(() => {
       const clauses: string[] = ["d.current_version_id = v.id"]; const args: SQLInputValue[] = [];
-      let from = "summary_documents d JOIN summary_versions v ON v.document_id=d.id JOIN codex_sessions s ON s.id=d.session_id";
+      let from = "summary_documents d JOIN summary_versions v ON v.document_id=d.id JOIN codex_sessions s ON s.id=d.session_id LEFT JOIN notes_exports n ON n.document_id=d.id";
       if (input.text?.trim()) { from += " JOIN summary_fts f ON f.document_id=d.id"; clauses.push("summary_fts MATCH ?"); args.push(toFtsQuery(input.text)); }
       if (input.cwd) { clauses.push("s.cwd = ?"); args.push(input.cwd); }
       if (input.profileId) { clauses.push("d.profile_id = ?"); args.push(input.profileId); }
@@ -195,18 +206,22 @@ export class SqliteSummaryDocumentRepository implements SummaryDocumentRepositor
       if (input.to) { clauses.push("d.updated_at <= ?"); args.push(input.to); }
       const where = `WHERE ${clauses.join(" AND ")}`;
       const total = Number((this.db.connection.prepare(`SELECT COUNT(*) count FROM ${from} ${where}`).get(...args) as Row).count);
-      const rows = this.db.connection.prepare(`SELECT d.id document_id,d.session_id,d.profile_id,d.updated_at,v.title,v.abstract,v.tags_json,v.kind,s.cwd FROM ${from} ${where} ORDER BY d.updated_at DESC LIMIT ? OFFSET ?`)
+      const rows = this.db.connection.prepare(`SELECT d.id document_id,d.session_id,d.profile_id,d.updated_at,v.title,v.abstract,v.tags_json,v.kind,s.cwd,n.external_id FROM ${from} ${where} ORDER BY d.updated_at DESC LIMIT ? OFFSET ?`)
         .all(...args, input.limit, input.offset) as Row[];
       return { total, items: rows.map((row) => ({
         documentId: String(row.document_id), sessionId: String(row.session_id), title: String(row.title), abstract: String(row.abstract),
-        tags: parseJson<string[]>(row.tags_json), cwd: String(row.cwd), profileId: String(row.profile_id), versionKind: String(row.kind), updatedAt: String(row.updated_at),
+        tags: parseJson<string[]>(row.tags_json), cwd: String(row.cwd), profileId: String(row.profile_id), versionKind: String(row.kind),
+        notesLinked: row.external_id !== null, updatedAt: String(row.updated_at),
       })) };
     });
   }
 
   private find(where: string, value: SQLInputValue): SummaryDocumentAggregate | null {
     const row = this.db.connection.prepare(`SELECT d.* FROM summary_documents d WHERE ${where} LIMIT 1`).get(value) as Row | undefined;
-    if (!row) return null;
+    return row ? this.mapDocument(row) : null;
+  }
+
+  private mapDocument(row: Row): SummaryDocumentAggregate {
     const versions = (this.db.connection.prepare("SELECT * FROM summary_versions WHERE document_id = ? ORDER BY sequence").all(String(row.id)) as Row[]).map(mapVersion);
     return new SummaryDocumentAggregate({
       id: String(row.id), sessionId: String(row.session_id), profileId: String(row.profile_id),
@@ -220,13 +235,14 @@ export class SqliteSummaryDocumentRepository implements SummaryDocumentRepositor
 
   private insertVersions(document: SummaryDocumentAggregate): void {
     const insertVersion = this.db.connection.prepare(`
-    INSERT OR IGNORE INTO summary_versions(id,document_id,sequence,kind,title,abstract,body_markdown,tags_json,source_turn_ids_json,source_hash,model,output_json,created_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+    INSERT OR IGNORE INTO summary_versions(id,document_id,sequence,kind,title,abstract,body_markdown,tags_json,source_turn_ids_json,source_hash,model,output_json,created_at,source_session_id,generation_mode,base_version_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `);
     for (const version of document.snapshot.versions) {
       const v = version.props;
       insertVersion.run(v.id, v.documentId, v.sequence, v.kind, v.content.title, v.content.abstract, v.content.bodyMarkdown,
-        JSON.stringify(v.content.tags), JSON.stringify(v.sourceRevision.turnIds), v.sourceRevision.contentHash, v.model, JSON.stringify(v.content), v.createdAt);
+        JSON.stringify(v.content.tags), JSON.stringify(v.sourceRevision.turnIds), v.sourceRevision.contentHash, v.model, JSON.stringify(v.content), v.createdAt,
+        v.sourceRevision.sessionId, v.generationMode, v.baseVersionId);
     }
   }
 
@@ -246,8 +262,10 @@ function toFtsQuery(input: string): string {
 function mapVersion(row: Row): SummaryVersion {
   return new SummaryVersion({
     id: String(row.id), documentId: String(row.document_id), sequence: Number(row.sequence), kind: String(row.kind) as SummaryVersionKind,
+    generationMode: String(row.generation_mode) as SummaryVersion["props"]["generationMode"],
+    baseVersionId: row.base_version_id === null ? null : String(row.base_version_id),
     content: { title: String(row.title), abstract: String(row.abstract), bodyMarkdown: String(row.body_markdown), tags: parseJson<string[]>(row.tags_json) },
-    sourceRevision: new SourceRevision(parseJson<string[]>(row.source_turn_ids_json), String(row.source_hash)),
+    sourceRevision: new SourceRevision(String(row.source_session_id), parseJson<string[]>(row.source_turn_ids_json), String(row.source_hash)),
     model: row.model === null ? null : String(row.model), createdAt: String(row.created_at),
   });
 }
@@ -256,9 +274,11 @@ export class SqliteSummaryJobRepository implements SummaryJobRepository {
   constructor(private readonly db: SynapseDatabase) {}
   async save(job: SummaryJob): Promise<void> {
     await this.db.execute(() => {
-      this.db.connection.prepare(`INSERT INTO summary_jobs(id,document_id,status,error,covered_turn_ids_json,stage_coverage_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)
-        ON CONFLICT(id) DO UPDATE SET status=excluded.status,error=excluded.error,covered_turn_ids_json=excluded.covered_turn_ids_json,stage_coverage_json=excluded.stage_coverage_json,updated_at=excluded.updated_at`)
-        .run(job.id, job.documentId, job.status, job.error, JSON.stringify(job.coveredTurnIds), JSON.stringify(job.stageCoverage), job.createdAt, job.updatedAt);
+      this.db.connection.prepare(`INSERT INTO summary_jobs(id,document_id,status,error,covered_turn_ids_json,stage_coverage_json,created_at,updated_at,source_session_id,generation_mode,base_version_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(id) DO UPDATE SET status=excluded.status,error=excluded.error,covered_turn_ids_json=excluded.covered_turn_ids_json,stage_coverage_json=excluded.stage_coverage_json,updated_at=excluded.updated_at,
+          source_session_id=excluded.source_session_id,generation_mode=excluded.generation_mode,base_version_id=excluded.base_version_id`)
+        .run(job.id, job.documentId, job.status, job.error, JSON.stringify(job.coveredTurnIds), JSON.stringify(job.stageCoverage), job.createdAt, job.updatedAt,
+          job.sourceSessionId, job.generationMode, job.baseVersionId);
     });
   }
   async findById(id: string): Promise<SummaryJob | null> {
@@ -270,10 +290,18 @@ export class SqliteSummaryJobRepository implements SummaryJobRepository {
 
   async findActiveBySessionId(sessionId: string): Promise<SummaryJob | null> {
     return this.db.execute(() => {
-      const row = this.db.connection.prepare(`SELECT j.* FROM summary_jobs j
-        JOIN summary_documents d ON d.id = j.document_id
-        WHERE d.session_id = ? AND j.status IN ('queued','running')
-        ORDER BY j.created_at DESC LIMIT 1`).get(sessionId) as Row | undefined;
+      const row = this.db.connection.prepare(`SELECT * FROM summary_jobs
+        WHERE source_session_id = ? AND status IN ('queued','running')
+        ORDER BY created_at DESC LIMIT 1`).get(sessionId) as Row | undefined;
+      return row ? mapSummaryJob(row) : null;
+    });
+  }
+
+  async findActiveByDocumentId(documentId: string): Promise<SummaryJob | null> {
+    return this.db.execute(() => {
+      const row = this.db.connection.prepare(`SELECT * FROM summary_jobs
+        WHERE document_id = ? AND status IN ('queued','running')
+        ORDER BY created_at DESC LIMIT 1`).get(documentId) as Row | undefined;
       return row ? mapSummaryJob(row) : null;
     });
   }
@@ -289,6 +317,8 @@ export class SqliteSummaryJobRepository implements SummaryJobRepository {
 function mapSummaryJob(row: Row): SummaryJob {
   return {
     id: String(row.id), documentId: String(row.document_id), status: String(row.status) as SummaryJob["status"],
+    sourceSessionId: String(row.source_session_id), generationMode: String(row.generation_mode) as SummaryJob["generationMode"],
+    baseVersionId: row.base_version_id === null ? null : String(row.base_version_id),
     error: row.error === null ? null : String(row.error), coveredTurnIds: parseJson<string[]>(row.covered_turn_ids_json),
     stageCoverage: parseJson<SummaryJob["stageCoverage"]>(row.stage_coverage_json), createdAt: String(row.created_at), updatedAt: String(row.updated_at),
   };
