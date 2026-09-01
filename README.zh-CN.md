@@ -14,6 +14,12 @@ Synapse 目前仅支持 macOS，依赖本地可用的 Codex binary。它不会�
 
 > **项目状态：** Synapse 仍处于早期开发阶段。仓库暂未提供正式签名和公证的安装包，可从源码运行或在本地构建。
 
+## 演示
+
+[![Synapse 产品演示](docs/assets/demo-video/synapse-demo.gif)](docs/assets/demo-video/synapse-demo.mp4)
+
+点击动画可打开完整的 1080p MP4。演示展示了 Synapse 如何选择事实 turns、按可复用模板生成结构化内容，或将新事实融入已有文档以便持续整理与回顾。
+
 ## 工作流
 
 ```text

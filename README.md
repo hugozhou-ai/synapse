@@ -14,6 +14,12 @@ Synapse currently supports macOS only and requires a locally available Codex bin
 
 > **Project status:** Synapse is in early development. The repository does not currently provide signed and notarized binaries; run it from source or build it locally.
 
+## Demo
+
+[![Synapse product demo](docs/assets/demo-video/synapse-demo.gif)](docs/assets/demo-video/synapse-demo.mp4)
+
+Click the animation to open the full-resolution 1080p MP4. The demo shows how Synapse selects factual turns, creates structured content from a reusable template, or merges new facts into an existing document for continued review.
+
 ## Workflow
 
 ```text
