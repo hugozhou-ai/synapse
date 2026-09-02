@@ -241,9 +241,28 @@ interface AppServerMcpStatusResponse {
   }[];
 }
 
+interface AppServerInstalledAppsResponse {
+  readonly apps?: readonly {
+    readonly id?: unknown;
+    readonly runtimeName?: unknown;
+    readonly enabled?: unknown;
+    readonly callable?: unknown;
+  }[];
+}
+
+interface NotionAsyncTask {
+  readonly taskId: string;
+  readonly status: "queued" | "running" | "retrying" | "succeeded" | "failed";
+  readonly pollAfterMs: number;
+  readonly error: string | null;
+}
+
 const NOTION_SERVER = "codex_apps";
 const NOTION_CREATE_TOOL = "notion.notion-create-pages";
 const NOTION_UPDATE_TOOL = "notion.notion-update-page";
+const NOTION_ASYNC_TASK_TOOL = "notion.notion-get-async-task";
+const MAX_NOTION_ASYNC_POLLS = 120;
+const MAX_NOTION_ASYNC_WAIT_MS = 10 * 60 * 1_000;
 
 export class CodexAppServerNotionPublisher implements SummaryPublisher, NotionConnectionGateway {
   readonly kind = "notion" as const;
@@ -252,6 +271,7 @@ export class CodexAppServerNotionPublisher implements SummaryPublisher, NotionCo
     private readonly client: CodexAppServerClient,
     private readonly runtimeDirectory: string,
     private readonly logger: Logger,
+    private readonly wait: (milliseconds: number) => Promise<void> = delay,
   ) {}
 
   async inspectConnection(): Promise<NotionConnectionView> {
@@ -259,10 +279,15 @@ export class CodexAppServerNotionPublisher implements SummaryPublisher, NotionCo
     try {
       const tools = await this.notionTools(threadId);
       const available = tools.has(NOTION_CREATE_TOOL) && tools.has(NOTION_UPDATE_TOOL);
+      const response = await this.client.request<AppServerInstalledAppsResponse>("app/installed", { threadId, forceRefresh: true });
+      const notion = response.apps?.find((app) => [app.id, app.runtimeName].some((value) => typeof value === "string" && value.toLowerCase().includes("notion")));
+      const connected = available && notion?.enabled === true && notion.callable === true;
       return {
         available,
-        connected: available,
-        message: available ? null : "Codex 中的 Notion App 未连接，或当前连接不提供页面写入工具。",
+        connected,
+        message: connected ? null : available
+          ? "Codex 中的 Notion App 当前不可调用，请检查是否已启用并完成授权。"
+          : "Codex 中的 Notion App 未安装，或当前版本不提供页面写入工具。",
       };
     } finally {
       await this.client.request("thread/unsubscribe", { threadId }).catch(() => undefined);
@@ -286,12 +311,12 @@ export class CodexAppServerNotionPublisher implements SummaryPublisher, NotionCo
           page_id: externalId,
           command: "replace_content",
           new_str: request.version.props.content.bodyMarkdown,
-        });
+        }, tools);
         await this.call(threadId, NOTION_UPDATE_TOOL, {
           page_id: externalId,
           command: "update_properties",
           properties: { title: request.version.props.content.title },
-        });
+        }, tools);
       } else {
         const response = await this.call(threadId, NOTION_CREATE_TOOL, {
           parent: { type: "page_id", page_id: normalizeNotionPageId(request.target.parentPageId) },
@@ -299,7 +324,7 @@ export class CodexAppServerNotionPublisher implements SummaryPublisher, NotionCo
             properties: { title: request.version.props.content.title },
             content: request.version.props.content.bodyMarkdown,
           }],
-        });
+        }, tools);
         externalId = extractNotionPageId(response);
       }
 
@@ -337,7 +362,7 @@ export class CodexAppServerNotionPublisher implements SummaryPublisher, NotionCo
     return new Set(Object.keys(server?.tools ?? {}).filter((tool) => tool.startsWith("notion.")));
   }
 
-  private async call(threadId: string, tool: string, args: unknown): Promise<AppServerMcpToolCallResponse> {
+  private async call(threadId: string, tool: string, args: unknown, tools: ReadonlySet<string>): Promise<AppServerMcpToolCallResponse> {
     const releaseAuthorization = this.client.authorizeMcp?.(threadId, NOTION_SERVER) ?? (() => undefined);
     try {
       const response = await this.client.request<AppServerMcpToolCallResponse>("mcpServer/tool/call", {
@@ -347,10 +372,41 @@ export class CodexAppServerNotionPublisher implements SummaryPublisher, NotionCo
         arguments: args,
       });
       if (response.isError) throw new DomainError("NOTION_MCP_CALL_FAILED", notionErrorMessage(response));
-      return response;
+      const task = findNotionAsyncTask(response);
+      if (task && !tools.has(NOTION_ASYNC_TASK_TOOL)) {
+        throw new DomainError("NOTION_ASYNC_UNAVAILABLE", "Notion 返回了异步任务，但当前连接不提供任务状态查询工具，无法确认发布结果。");
+      }
+      return task ? await this.awaitAsyncTask(threadId, task, response) : response;
     } finally {
       releaseAuthorization();
     }
+  }
+
+  private async awaitAsyncTask(threadId: string, initial: NotionAsyncTask, initialResponse: AppServerMcpToolCallResponse): Promise<AppServerMcpToolCallResponse> {
+    let task = initial;
+    let response = initialResponse;
+    let waitedMs = 0;
+    for (let poll = 0; poll < MAX_NOTION_ASYNC_POLLS; poll += 1) {
+      if (task.status === "succeeded") return response;
+      if (task.status === "failed") throw new DomainError("NOTION_ASYNC_TASK_FAILED", task.error ?? "Notion 异步任务执行失败。");
+      if (waitedMs + task.pollAfterMs > MAX_NOTION_ASYNC_WAIT_MS) break;
+      await this.wait(task.pollAfterMs);
+      waitedMs += task.pollAfterMs;
+      response = await this.callDirect(threadId, NOTION_ASYNC_TASK_TOOL, { task_id: task.taskId });
+      task = findNotionAsyncTask(response) ?? invalidNotionAsyncTask();
+    }
+    throw new DomainError("NOTION_ASYNC_TASK_TIMEOUT", "Notion 异步任务长时间未完成，已停止等待。");
+  }
+
+  private async callDirect(threadId: string, tool: string, args: unknown): Promise<AppServerMcpToolCallResponse> {
+    const response = await this.client.request<AppServerMcpToolCallResponse>("mcpServer/tool/call", {
+      threadId,
+      server: NOTION_SERVER,
+      tool,
+      arguments: args,
+    });
+    if (response.isError) throw new DomainError("NOTION_MCP_CALL_FAILED", notionErrorMessage(response));
+    return response;
   }
 }
 
@@ -401,4 +457,48 @@ function notionErrorMessage(response: AppServerMcpToolCallResponse): string {
     return "";
   }).filter(Boolean).join("\n");
   return text || "Notion MCP 调用失败。";
+}
+
+function findNotionAsyncTask(value: unknown): NotionAsyncTask | null {
+  for (const candidate of nestedValues(value)) {
+    if (!isRecord(candidate)) continue;
+    const taskId = candidate.task_id ?? candidate.taskId;
+    const status = candidate.status;
+    if (typeof taskId !== "string" || !isNotionTaskStatus(status)) continue;
+    const rawMilliseconds = candidate.poll_after_ms ?? candidate.suggested_backoff_ms ?? candidate.retry_after_ms;
+    const rawSeconds = candidate.poll_after_seconds ?? candidate.suggested_backoff_seconds ?? candidate.retry_after_seconds;
+    const pollAfterMs = typeof rawMilliseconds === "number" && Number.isFinite(rawMilliseconds) && rawMilliseconds >= 0
+      ? rawMilliseconds
+      : typeof rawSeconds === "number" && Number.isFinite(rawSeconds) && rawSeconds >= 0 ? rawSeconds * 1_000 : 1_000;
+    const error = candidate.error === undefined ? null : typeof candidate.error === "string" ? candidate.error : JSON.stringify(candidate.error);
+    return { taskId, status, pollAfterMs: Math.min(pollAfterMs, 30_000), error };
+  }
+  return null;
+}
+
+function* nestedValues(value: unknown): Generator<unknown> {
+  yield value;
+  if (typeof value === "string") {
+    try { yield* nestedValues(JSON.parse(value)); } catch {}
+  } else if (Array.isArray(value)) {
+    for (const item of value) yield* nestedValues(item);
+  } else if (isRecord(value)) {
+    for (const item of Object.values(value)) yield* nestedValues(item);
+  }
+}
+
+function isNotionTaskStatus(value: unknown): value is NotionAsyncTask["status"] {
+  return value === "queued" || value === "running" || value === "retrying" || value === "succeeded" || value === "failed";
+}
+
+function invalidNotionAsyncTask(): never {
+  throw new DomainError("NOTION_MCP_INVALID_RESPONSE", "Notion 异步任务返回了无效状态。");
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

@@ -59,25 +59,79 @@ export function contributionVersions(versions: readonly SummaryVersionView[], ba
 
 function lines(value: string): string[] { return value === "" ? [] : value.split("\n"); }
 
+type SequenceOperation<T> = { kind: "equal" | "add" | "remove"; value: T };
+const MAX_MYERS_EDIT_DISTANCE = 512;
+
 function sequenceDiff<T>(before: readonly T[], after: readonly T[]): Array<{ kind: "equal" | "add" | "remove"; value: T }> {
-  const lengths = Array.from({ length: before.length + 1 }, () => Array<number>(after.length + 1).fill(0));
-  for (let left = before.length - 1; left >= 0; left -= 1) {
-    for (let right = after.length - 1; right >= 0; right -= 1) {
-      lengths[left]![right] = before[left] === after[right]
-        ? lengths[left + 1]![right + 1]! + 1
-        : Math.max(lengths[left + 1]![right]!, lengths[left]![right + 1]!);
+  let prefixLength = 0;
+  while (prefixLength < before.length && prefixLength < after.length && before[prefixLength] === after[prefixLength]) prefixLength += 1;
+  let suffixLength = 0;
+  while (
+    suffixLength < before.length - prefixLength
+    && suffixLength < after.length - prefixLength
+    && before[before.length - suffixLength - 1] === after[after.length - suffixLength - 1]
+  ) suffixLength += 1;
+
+  const prefix = before.slice(0, prefixLength).map((value) => ({ kind: "equal" as const, value }));
+  const oldMiddle = before.slice(prefixLength, before.length - suffixLength);
+  const newMiddle = after.slice(prefixLength, after.length - suffixLength);
+  const middle = myersDiff(oldMiddle, newMiddle)
+    ?? [...oldMiddle.map((value) => ({ kind: "remove" as const, value })), ...newMiddle.map((value) => ({ kind: "add" as const, value }))];
+  const suffix = before.slice(before.length - suffixLength).map((value) => ({ kind: "equal" as const, value }));
+  return [...prefix, ...middle, ...suffix];
+}
+
+function myersDiff<T>(before: readonly T[], after: readonly T[]): SequenceOperation<T>[] | null {
+  if (before.length === 0) return after.map((value) => ({ kind: "add", value }));
+  if (after.length === 0) return before.map((value) => ({ kind: "remove", value }));
+  const maximumDistance = Math.min(before.length + after.length, MAX_MYERS_EDIT_DISTANCE);
+  const frontier = new Map<number, number>([[1, 0]]);
+  const trace: Array<ReadonlyMap<number, number>> = [];
+  for (let distance = 0; distance <= maximumDistance; distance += 1) {
+    trace.push(new Map(frontier));
+    for (let diagonal = -distance; diagonal <= distance; diagonal += 2) {
+      let left = diagonal === -distance || (diagonal !== distance && frontierValue(frontier, diagonal - 1) < frontierValue(frontier, diagonal + 1))
+        ? frontierValue(frontier, diagonal + 1)
+        : frontierValue(frontier, diagonal - 1) + 1;
+      let right = left - diagonal;
+      while (left < before.length && right < after.length && before[left] === after[right]) { left += 1; right += 1; }
+      frontier.set(diagonal, left);
+      if (left >= before.length && right >= after.length) return backtrackMyers(trace, before, after);
     }
   }
-  const result: Array<{ kind: "equal" | "add" | "remove"; value: T }> = [];
-  let left = 0; let right = 0;
-  while (left < before.length && right < after.length) {
-    if (before[left] === after[right]) { result.push({ kind: "equal", value: before[left]! }); left += 1; right += 1; }
-    else if (lengths[left + 1]![right]! >= lengths[left]![right + 1]!) { result.push({ kind: "remove", value: before[left]! }); left += 1; }
-    else { result.push({ kind: "add", value: after[right]! }); right += 1; }
+  return null;
+}
+
+function backtrackMyers<T>(trace: readonly ReadonlyMap<number, number>[], before: readonly T[], after: readonly T[]): SequenceOperation<T>[] {
+  const reversed: SequenceOperation<T>[] = [];
+  let left = before.length;
+  let right = after.length;
+  for (let distance = trace.length - 1; distance >= 0; distance -= 1) {
+    const frontier = trace[distance]!;
+    const diagonal = left - right;
+    const previousDiagonal = diagonal === -distance || (diagonal !== distance && frontierValue(frontier, diagonal - 1) < frontierValue(frontier, diagonal + 1))
+      ? diagonal + 1
+      : diagonal - 1;
+    const previousLeft = frontierValue(frontier, previousDiagonal);
+    const previousRight = previousLeft - previousDiagonal;
+    while (left > previousLeft && right > previousRight) {
+      reversed.push({ kind: "equal", value: before[left - 1]! });
+      left -= 1; right -= 1;
+    }
+    if (distance === 0) break;
+    if (left === previousLeft) {
+      right -= 1;
+      reversed.push({ kind: "add", value: after[right]! });
+    } else {
+      left -= 1;
+      reversed.push({ kind: "remove", value: before[left]! });
+    }
   }
-  while (left < before.length) { result.push({ kind: "remove", value: before[left]! }); left += 1; }
-  while (right < after.length) { result.push({ kind: "add", value: after[right]! }); right += 1; }
-  return result;
+  return reversed.reverse();
+}
+
+function frontierValue(frontier: ReadonlyMap<number, number>, diagonal: number): number {
+  return frontier.get(diagonal) ?? Number.NEGATIVE_INFINITY;
 }
 
 function diffWords(before: string, after: string): { before: DiffPart[]; after: DiffPart[] } {

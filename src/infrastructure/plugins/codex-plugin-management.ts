@@ -16,6 +16,8 @@ interface PluginManifest { name: string; version: string; author?: { name?: stri
 interface MarketplacePlugin { name?: unknown; source?: { source?: unknown; path?: unknown }; [key: string]: unknown; }
 interface MarketplaceRoot { name?: unknown; interface?: unknown; plugins?: unknown; [key: string]: unknown; }
 interface PluginList { installed?: Array<{ pluginId?: unknown; version?: unknown; installed?: unknown; enabled?: unknown }>; }
+interface SourceInstallation { commit(): Promise<void>; rollback(): Promise<void>; }
+interface FileSnapshot { readonly content: Buffer | null; readonly mode: number | null; }
 
 export class FileSystemCodexPluginManagement implements CodexPluginManagement {
   readonly pluginPath: string;
@@ -53,19 +55,36 @@ export class FileSystemCodexPluginManagement implements CodexPluginManagement {
     await this.assertDestinationOwned();
     const marketplace = await this.prepareMarketplace();
     const binary = await new CodexBinaryResolver(this.logger).resolve(this.configuredCodexPath);
-    await this.installSource(sourceManifest, bundledVersion);
-    await this.writeMarketplace(marketplace);
+    const previouslyInstalled = await this.isInstalled(binary.path);
+    const marketplaceSnapshot = await snapshotFile(this.marketplacePath);
+    let sourceInstallation: SourceInstallation | null = null;
+    let cliAdded = false;
     try {
+      sourceInstallation = await this.installSource(sourceManifest, bundledVersion);
+      await this.writeMarketplace(marketplace);
       await execFileAsync(binary.path, ["plugin", "add", `${PLUGIN_NAME}@${MARKETPLACE_NAME}`, "--json"], { timeout: 30_000, maxBuffer: 2 * 1024 * 1024 });
+      cliAdded = true;
+      const verification = await this.inspect();
+      if (!verification.current) throw new DomainError("PLUGIN_INSTALL_FAILED", verification.message ?? "Codex 未加载刚安装的引用插件版本。");
+      await sourceInstallation.commit().catch((cleanupError) => {
+        this.logger.error("[synapse:plugin]", "backup-cleanup-failed", { message: errorMessage(cleanupError), pluginPath: this.pluginPath });
+      });
+      this.logger.info("[synapse:plugin]", "installed", { version: bundledVersion, pluginPath: this.pluginPath, marketplacePath: this.marketplacePath });
+      return this.status(bundledVersion, bundledVersion, "插件已安装；请新建 Codex 任务后使用引用。");
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.error("[synapse:plugin]", "installation-failed", { message, pluginPath: this.pluginPath, marketplacePath: this.marketplacePath });
-      throw new DomainError("PLUGIN_INSTALL_FAILED", `Codex 插件安装失败：${message}`);
+      const rollbackErrors: string[] = [];
+      if (sourceInstallation) await sourceInstallation.rollback().catch((rollbackError) => rollbackErrors.push(errorMessage(rollbackError)));
+      await restoreFile(this.marketplacePath, marketplaceSnapshot).catch((rollbackError) => rollbackErrors.push(errorMessage(rollbackError)));
+      if (cliAdded) {
+        const command = previouslyInstalled ? "add" : "remove";
+        await execFileAsync(binary.path, ["plugin", command, `${PLUGIN_NAME}@${MARKETPLACE_NAME}`, "--json"], { timeout: 30_000, maxBuffer: 2 * 1024 * 1024 })
+          .catch((rollbackError) => rollbackErrors.push(errorMessage(rollbackError)));
+      }
+      const message = errorMessage(error);
+      const rollbackMessage = rollbackErrors.length > 0 ? `；回滚未完整完成：${rollbackErrors.join("；")}` : "";
+      this.logger.error("[synapse:plugin]", "installation-failed", { message, rollbackErrors: JSON.stringify(rollbackErrors), pluginPath: this.pluginPath, marketplacePath: this.marketplacePath });
+      throw new DomainError("PLUGIN_INSTALL_FAILED", `Codex 插件安装失败：${message}${rollbackMessage}`);
     }
-    const verification = await this.inspect();
-    if (!verification.current) throw new DomainError("PLUGIN_INSTALL_FAILED", verification.message ?? "Codex 未加载刚安装的引用插件版本。");
-    this.logger.info("[synapse:plugin]", "installed", { version: bundledVersion, pluginPath: this.pluginPath, marketplacePath: this.marketplacePath });
-    return this.status(bundledVersion, bundledVersion, "插件已安装；请新建 Codex 任务后使用引用。");
   }
 
   private status(bundledVersion: string, installedVersion: string | null, message: string | null): CodexPluginInstallationStatus {
@@ -103,7 +122,7 @@ export class FileSystemCodexPluginManagement implements CodexPluginManagement {
     }
   }
 
-  private async installSource(sourceManifest: PluginManifest, version: string): Promise<void> {
+  private async installSource(sourceManifest: PluginManifest, version: string): Promise<SourceInstallation> {
     await mkdir(dirname(this.pluginPath), { recursive: true, mode: 0o700 });
     const staging = `${this.pluginPath}.installing-${process.pid}-${Date.now()}`;
     await cp(this.bundledPluginPath, staging, { recursive: true, errorOnExist: true });
@@ -114,12 +133,18 @@ export class FileSystemCodexPluginManagement implements CodexPluginManagement {
     try { await stat(this.pluginPath); hadExisting = true; await rename(this.pluginPath, backup); } catch (error) { if (!isNotFound(error)) throw error; }
     try {
       await rename(staging, this.pluginPath);
-      if (hadExisting) await rm(backup, { recursive: true, force: true });
     } catch (error) {
       await rm(staging, { recursive: true, force: true });
       if (hadExisting) await rename(backup, this.pluginPath);
       throw error;
     }
+    return {
+      commit: async () => { if (hadExisting) await rm(backup, { recursive: true, force: true }); },
+      rollback: async () => {
+        await rm(this.pluginPath, { recursive: true, force: true });
+        if (hadExisting) await rename(backup, this.pluginPath);
+      },
+    };
   }
 
   private async prepareMarketplace(): Promise<MarketplaceRoot> {
@@ -152,8 +177,13 @@ export class FileSystemCodexPluginManagement implements CodexPluginManagement {
 
   private async writeMarketplace(updated: MarketplaceRoot): Promise<void> {
     await mkdir(dirname(this.marketplacePath), { recursive: true, mode: 0o700 });
-    await backupIfPresent(this.marketplacePath);
     await atomicWrite(this.marketplacePath, `${JSON.stringify(updated, null, 2)}\n`, 0o600);
+  }
+
+  private async isInstalled(binary: string): Promise<boolean> {
+    const { stdout } = await execFileAsync(binary, ["plugin", "list", "--json"], { timeout: 10_000, maxBuffer: 2 * 1024 * 1024 });
+    const parsed = JSON.parse(stdout) as PluginList;
+    return parsed.installed?.some((item) => item.pluginId === `${PLUGIN_NAME}@${MARKETPLACE_NAME}` && item.installed === true) ?? false;
   }
 
   private async readMarketplace(): Promise<MarketplaceRoot> {
@@ -186,10 +216,25 @@ async function atomicWrite(path: string, content: string, mode: number): Promise
   await rename(temporary, path);
 }
 
-async function backupIfPresent(path: string): Promise<void> {
-  try { await stat(path); await cp(path, `${path}.${new Date().toISOString().replaceAll(":", "-")}.bak`); }
-  catch (error) { if (!isNotFound(error)) throw error; }
+async function snapshotFile(path: string): Promise<FileSnapshot> {
+  try {
+    const [content, metadata] = await Promise.all([readFile(path), stat(path)]);
+    return { content, mode: metadata.mode & 0o777 };
+  } catch (error) {
+    if (isNotFound(error)) return { content: null, mode: null };
+    throw error;
+  }
+}
+
+async function restoreFile(path: string, snapshot: FileSnapshot): Promise<void> {
+  if (snapshot.content === null) {
+    await rm(path, { force: true });
+    return;
+  }
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  await atomicWrite(path, snapshot.content.toString(), snapshot.mode ?? 0o600);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === "object" && !Array.isArray(value); }
 function isNotFound(error: unknown): boolean { return (error as NodeJS.ErrnoException)?.code === "ENOENT"; }
+function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error); }

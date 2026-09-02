@@ -20,6 +20,14 @@ describe("summary diff", () => {
     expect(diffSummaryContent(before, before).stats).toEqual({ added: 0, removed: 0, modified: 0 });
   });
 
+  it("bounds work for large unrelated summaries", () => {
+    const before = { ...emptySummaryContent, bodyMarkdown: Array.from({ length: 5_000 }, (_, index) => `old-${index}`).join("\n") };
+    const after = { ...emptySummaryContent, bodyMarkdown: Array.from({ length: 5_000 }, (_, index) => `new-${index}`).join("\n") };
+    const result = diffSummaryContent(before, after);
+    expect(result.rows).toHaveLength(5_000);
+    expect(result.stats).toEqual({ added: 0, removed: 0, modified: 5_000 });
+  });
+
   it("returns every contribution between arbitrary version boundaries", () => {
     const version = (sequence: number): SummaryVersionView => ({ id: `v${sequence}`, sequence, kind: "agent-draft", generationMode: "new", operation: sequence ? "regenerate" : "generate", parentVersionId: sequence ? `v${sequence - 1}` : null, baseVersionId: null, sourceSessionId: "session", sourceTurnIds: ["turn"], sourceHash: "hash", model: null, content: { ...emptySummaryContent }, createdAt: "now" });
     expect(contributionVersions([version(0), version(1), version(2)], 0, 2).map((item) => item.id)).toEqual(["v1", "v2"]);
