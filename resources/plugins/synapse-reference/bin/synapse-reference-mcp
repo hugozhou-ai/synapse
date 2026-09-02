@@ -1,0 +1,26 @@
+#!/bin/sh
+
+set -eu
+
+plugin_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+server="$plugin_root/scripts/mcp-server.mjs"
+
+if [ -n "${SYNAPSE_APP_EXECUTABLE:-}" ] && [ -x "$SYNAPSE_APP_EXECUTABLE" ]; then
+  exec env ELECTRON_RUN_AS_NODE=1 "$SYNAPSE_APP_EXECUTABLE" "$server"
+fi
+
+for executable in \
+  "/Applications/Synapse.app/Contents/MacOS/Synapse" \
+  "$HOME/Applications/Synapse.app/Contents/MacOS/Synapse"
+do
+  if [ -x "$executable" ]; then
+    exec env ELECTRON_RUN_AS_NODE=1 "$executable" "$server"
+  fi
+done
+
+if command -v node >/dev/null 2>&1; then
+  exec node "$server"
+fi
+
+echo "[synapse:mcp] $(printf '%s' '{"event":"runtime-not-found","message":"Install Synapse.app or Node.js 22.13+."}')" >&2
+exit 1

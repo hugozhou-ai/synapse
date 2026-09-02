@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "synapse-reference": {
+      "command": "./bin/synapse-reference-mcp",
+      "args": [],
+      "cwd": ".",
+      "env_vars": ["SYNAPSE_APP_EXECUTABLE", "SYNAPSE_DATABASE_PATH"]
+    }
+  }
+}

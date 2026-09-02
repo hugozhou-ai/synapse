@@ -54,7 +54,7 @@ function createService(raw: Record<string, unknown>, trust: HookTrustGateway, lo
   let currentManifest: HookInstallManifest | null = manifest;
   let relayInstalled = true;
   let currentSettings: ApplicationSettings = {
-    codexBinaryPath: null, summaryModel: null, syncNotesByDefault: false, notesAccount: null, notesFolder: "Synapse",
+    codexBinaryPath: null, summaryModel: null, defaultPublicationKind: null, notionParentPageId: "", notesAccount: null, notesFolder: "Synapse",
     widgetVisible: true, widgetPositions: {}, widgetDisplayId: null, hookSetupAcknowledged: false,
   };
   const config: CodexHookConfigStore = {

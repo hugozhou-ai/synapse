@@ -31,6 +31,7 @@ export class AppleNotesSummaryPublisher implements SummaryPublisher, NotesTarget
   }
 
   async publish(request: PublishSummaryRequest): Promise<PublicationReceipt> {
+    if (request.target.kind !== "apple-notes") throw new Error("Apple Notes publisher received an incompatible target.");
     const payload = JSON.stringify({
       action: "publish",
       account: request.target.account,
@@ -42,10 +43,10 @@ export class AppleNotesSummaryPublisher implements SummaryPublisher, NotesTarget
     try {
       const stdout = await this.executor.execute(this.scriptPath, payload);
       const parsed = JSON.parse(stdout.trim()) as PublicationReceipt;
-      this.logger.info("[synapse:notes]", "publish-succeeded", { documentId: request.documentId, versionId: request.version.props.id, updated: parsed.updated });
+      this.logger.info("[synapse:publication]", "publish-succeeded", { details: JSON.stringify({ publisher: this.kind, documentId: request.documentId, versionId: request.version.props.id, updated: parsed.updated }) });
       return parsed;
     } catch (error) {
-      this.logger.error("[synapse:notes]", "publish-failed", { documentId: request.documentId, versionId: request.version.props.id, message: error instanceof Error ? error.message : String(error) });
+      this.logger.error("[synapse:publication]", "publish-failed", { details: JSON.stringify({ publisher: this.kind, documentId: request.documentId, versionId: request.version.props.id, message: error instanceof Error ? error.message : String(error) }) });
       throw error;
     }
   }

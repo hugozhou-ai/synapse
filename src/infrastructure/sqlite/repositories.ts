@@ -1,5 +1,5 @@
 import { CodexSessionAggregate, CodexTurn, type CodexLifecycleEvent, type CodexSessionProps, type SessionStatus, type TurnStatus } from "@domain/session";
-import { PublicationTarget, SourceRevision, SummaryDocumentAggregate, SummaryProfile, SummaryVersion, TurnSelection, type PublicationStatus, type SummaryProfileKind, type SummaryVersionKind } from "@domain/summary";
+import { AppleNotesPublicationTarget, NotionPublicationTarget, SourceRevision, SummaryDocumentAggregate, SummaryProfile, SummaryVersion, TurnSelection, type PublicationStatus, type PublicationTarget, type PublisherKind, type SummaryProfileKind, type SummaryVersionKind, type SummaryVersionOperation } from "@domain/summary";
 import type {
   ApplicationSettings, CodexSessionRepository, CodexTurnRepository, HookEventRepository, OutboxMessage, OutboxRepository,
   PublicationRecord, PublicationRepository, SettingsRepository, SummaryDocumentRepository, SummaryJob, SummaryJobRepository,
@@ -164,9 +164,9 @@ export class SqliteSummaryDocumentRepository implements SummaryDocumentRepositor
     await this.db.execute(() => {
       const p = document.snapshot;
       this.db.connection.prepare(`
-      INSERT INTO summary_documents(id,session_id,profile_id,selected_turn_ids_json,current_version_id,notes_account,notes_folder,publication_status,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?)
-      `).run(p.id, p.sessionId, p.profileId, JSON.stringify(p.selection.turnIds), p.currentVersionId, p.publicationTarget?.account ?? null, p.publicationTarget?.folder ?? null, p.publicationStatus, p.createdAt, p.updatedAt);
+      INSERT INTO summary_documents(id,session_id,profile_id,selected_turn_ids_json,current_version_id,publication_target_json,publication_status,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?)
+      `).run(p.id, p.sessionId, p.profileId, JSON.stringify(p.selection.turnIds), p.currentVersionId, serializePublicationTarget(p.publicationTarget), p.publicationStatus, p.createdAt, p.updatedAt);
       this.insertVersions(document);
       if (p.currentVersionId) this.refreshFts(document);
     });
@@ -176,9 +176,9 @@ export class SqliteSummaryDocumentRepository implements SummaryDocumentRepositor
     await this.db.execute(() => {
       const p = document.snapshot;
       const result = this.db.connection.prepare(`
-      UPDATE summary_documents SET profile_id=?,selected_turn_ids_json=?,current_version_id=?,notes_account=?,notes_folder=?,publication_status=?,updated_at=?
+      UPDATE summary_documents SET profile_id=?,selected_turn_ids_json=?,current_version_id=?,publication_target_json=?,publication_status=?,updated_at=?
       WHERE id=?
-      `).run(p.profileId, JSON.stringify(p.selection.turnIds), p.currentVersionId, p.publicationTarget?.account ?? null, p.publicationTarget?.folder ?? null, p.publicationStatus, p.updatedAt, p.id);
+      `).run(p.profileId, JSON.stringify(p.selection.turnIds), p.currentVersionId, serializePublicationTarget(p.publicationTarget), p.publicationStatus, p.updatedAt, p.id);
       if (Number(result.changes) === 0) throw new DomainError("SUMMARY_NOT_FOUND", "Summary document does not exist.");
       this.insertVersions(document);
       if (p.currentVersionId) this.refreshFts(document);
@@ -197,7 +197,7 @@ export class SqliteSummaryDocumentRepository implements SummaryDocumentRepositor
   async search(input: SummarySearchCriteria): Promise<SummarySearchResult> {
     return this.db.execute(() => {
       const clauses: string[] = ["d.current_version_id = v.id"]; const args: SQLInputValue[] = [];
-      let from = "summary_documents d JOIN summary_versions v ON v.document_id=d.id JOIN codex_sessions s ON s.id=d.session_id LEFT JOIN notes_exports n ON n.document_id=d.id";
+      let from = "summary_documents d JOIN summary_versions v ON v.document_id=d.id JOIN codex_sessions s ON s.id=d.session_id LEFT JOIN publications p ON p.document_id=d.id";
       if (input.text?.trim()) { from += " JOIN summary_fts f ON f.document_id=d.id"; clauses.push("summary_fts MATCH ?"); args.push(toFtsQuery(input.text)); }
       if (input.cwd) { clauses.push("s.cwd = ?"); args.push(input.cwd); }
       if (input.profileId) { clauses.push("d.profile_id = ?"); args.push(input.profileId); }
@@ -206,12 +206,14 @@ export class SqliteSummaryDocumentRepository implements SummaryDocumentRepositor
       if (input.to) { clauses.push("d.updated_at <= ?"); args.push(input.to); }
       const where = `WHERE ${clauses.join(" AND ")}`;
       const total = Number((this.db.connection.prepare(`SELECT COUNT(*) count FROM ${from} ${where}`).get(...args) as Row).count);
-      const rows = this.db.connection.prepare(`SELECT d.id document_id,d.session_id,d.profile_id,d.updated_at,v.title,v.abstract,v.tags_json,v.kind,s.cwd,n.external_id FROM ${from} ${where} ORDER BY d.updated_at DESC LIMIT ? OFFSET ?`)
+      const rows = this.db.connection.prepare(`SELECT d.id document_id,d.session_id,d.profile_id,d.updated_at,v.title,v.abstract,v.tags_json,v.kind,s.cwd,p.external_id,p.publisher FROM ${from} ${where} ORDER BY d.updated_at DESC LIMIT ? OFFSET ?`)
         .all(...args, input.limit, input.offset) as Row[];
       return { total, items: rows.map((row) => ({
         documentId: String(row.document_id), sessionId: String(row.session_id), title: String(row.title), abstract: String(row.abstract),
         tags: parseJson<string[]>(row.tags_json), cwd: String(row.cwd), profileId: String(row.profile_id), versionKind: String(row.kind),
-        notesLinked: row.external_id !== null, updatedAt: String(row.updated_at),
+        notesLinked: row.publisher === "apple-notes" && row.external_id !== null,
+        notionLinked: row.publisher === "notion" && row.external_id !== null,
+        updatedAt: String(row.updated_at),
       })) };
     });
   }
@@ -227,7 +229,7 @@ export class SqliteSummaryDocumentRepository implements SummaryDocumentRepositor
       id: String(row.id), sessionId: String(row.session_id), profileId: String(row.profile_id),
       selection: new TurnSelection(parseJson<string[]>(row.selected_turn_ids_json)), versions,
       currentVersionId: row.current_version_id === null ? null : String(row.current_version_id),
-      publicationTarget: row.notes_folder === null ? null : new PublicationTarget(row.notes_account === null ? null : String(row.notes_account), String(row.notes_folder)),
+      publicationTarget: deserializePublicationTarget(row.publication_target_json),
       publicationStatus: String(row.publication_status) as PublicationStatus,
       createdAt: String(row.created_at), updatedAt: String(row.updated_at),
     });
@@ -235,14 +237,14 @@ export class SqliteSummaryDocumentRepository implements SummaryDocumentRepositor
 
   private insertVersions(document: SummaryDocumentAggregate): void {
     const insertVersion = this.db.connection.prepare(`
-    INSERT OR IGNORE INTO summary_versions(id,document_id,sequence,kind,title,abstract,body_markdown,tags_json,source_turn_ids_json,source_hash,model,output_json,created_at,source_session_id,generation_mode,base_version_id)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    INSERT OR IGNORE INTO summary_versions(id,document_id,sequence,kind,title,abstract,body_markdown,tags_json,source_turn_ids_json,source_hash,model,output_json,created_at,source_session_id,generation_mode,base_version_id,parent_version_id,operation)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `);
     for (const version of document.snapshot.versions) {
       const v = version.props;
       insertVersion.run(v.id, v.documentId, v.sequence, v.kind, v.content.title, v.content.abstract, v.content.bodyMarkdown,
         JSON.stringify(v.content.tags), JSON.stringify(v.sourceRevision.turnIds), v.sourceRevision.contentHash, v.model, JSON.stringify(v.content), v.createdAt,
-        v.sourceRevision.sessionId, v.generationMode, v.baseVersionId);
+        v.sourceRevision.sessionId, v.generationMode, v.baseVersionId, v.parentVersionId, v.operation);
     }
   }
 
@@ -263,6 +265,8 @@ function mapVersion(row: Row): SummaryVersion {
   return new SummaryVersion({
     id: String(row.id), documentId: String(row.document_id), sequence: Number(row.sequence), kind: String(row.kind) as SummaryVersionKind,
     generationMode: String(row.generation_mode) as SummaryVersion["props"]["generationMode"],
+    operation: String(row.operation) as SummaryVersionOperation,
+    parentVersionId: row.parent_version_id === null ? null : String(row.parent_version_id),
     baseVersionId: row.base_version_id === null ? null : String(row.base_version_id),
     content: { title: String(row.title), abstract: String(row.abstract), bodyMarkdown: String(row.body_markdown), tags: parseJson<string[]>(row.tags_json) },
     sourceRevision: new SourceRevision(String(row.source_session_id), parseJson<string[]>(row.source_turn_ids_json), String(row.source_hash)),
@@ -326,17 +330,19 @@ function mapSummaryJob(row: Row): SummaryJob {
 
 export class SqlitePublicationRepository implements PublicationRepository {
   constructor(private readonly db: SynapseDatabase) {}
-  async find(documentId: string, publisher: "apple-notes"): Promise<PublicationRecord | null> {
+  async find(documentId: string, publisher?: PublisherKind): Promise<PublicationRecord | null> {
     return this.db.execute(() => {
-      const row = this.db.connection.prepare("SELECT * FROM notes_exports WHERE document_id = ? AND publisher = ?").get(documentId, publisher) as Row | undefined;
-      return row ? { documentId: String(row.document_id), publisher, externalId: row.external_id === null ? null : String(row.external_id), target: new PublicationTarget(row.account === null ? null : String(row.account), String(row.folder)), versionId: String(row.version_id), status: String(row.status) as PublicationRecord["status"], error: row.error === null ? null : String(row.error), updatedAt: String(row.updated_at) } : null;
+      const row = publisher
+        ? this.db.connection.prepare("SELECT * FROM publications WHERE document_id = ? AND publisher = ?").get(documentId, publisher) as Row | undefined
+        : this.db.connection.prepare("SELECT * FROM publications WHERE document_id = ?").get(documentId) as Row | undefined;
+      return row ? { documentId: String(row.document_id), publisher: String(row.publisher) as PublisherKind, externalId: row.external_id === null ? null : String(row.external_id), target: deserializePublicationTarget(row.target_json)!, versionId: String(row.version_id), status: String(row.status) as PublicationRecord["status"], error: row.error === null ? null : String(row.error), updatedAt: String(row.updated_at) } : null;
     });
   }
   async save(record: PublicationRecord): Promise<void> {
     await this.db.execute(() => {
-      this.db.connection.prepare(`INSERT INTO notes_exports(document_id,publisher,external_id,account,folder,version_id,status,error,updated_at) VALUES (?,?,?,?,?,?,?,?,?)
-        ON CONFLICT(document_id) DO UPDATE SET external_id=excluded.external_id,account=excluded.account,folder=excluded.folder,version_id=excluded.version_id,status=excluded.status,error=excluded.error,updated_at=excluded.updated_at`)
-        .run(record.documentId, record.publisher, record.externalId, record.target.account, record.target.folder, record.versionId, record.status, record.error, record.updatedAt);
+      this.db.connection.prepare(`INSERT INTO publications(document_id,publisher,external_id,target_json,version_id,status,error,updated_at) VALUES (?,?,?,?,?,?,?,?)
+        ON CONFLICT(document_id) DO UPDATE SET publisher=excluded.publisher,external_id=excluded.external_id,target_json=excluded.target_json,version_id=excluded.version_id,status=excluded.status,error=excluded.error,updated_at=excluded.updated_at`)
+        .run(record.documentId, record.publisher, record.externalId, serializePublicationTarget(record.target), record.versionId, record.status, record.error, record.updatedAt);
     });
   }
 }
@@ -365,8 +371,8 @@ export class SqliteOutboxRepository implements OutboxRepository {
 }
 
 const defaultSettings: ApplicationSettings = {
-  codexBinaryPath: null, summaryModel: null, syncNotesByDefault: false, notesAccount: null,
-  notesFolder: "Synapse", widgetVisible: true, widgetPositions: {}, widgetDisplayId: null, hookSetupAcknowledged: false,
+  codexBinaryPath: null, summaryModel: null, notesAccount: null, notesFolder: "Synapse",
+  defaultPublicationKind: null, notionParentPageId: "", widgetVisible: true, widgetPositions: {}, widgetDisplayId: null, hookSetupAcknowledged: false,
 };
 
 export class SqliteSettingsRepository implements SettingsRepository {
@@ -374,7 +380,11 @@ export class SqliteSettingsRepository implements SettingsRepository {
   async read(): Promise<ApplicationSettings> {
     return this.db.execute(() => {
       const row = this.db.connection.prepare("SELECT value_json FROM application_settings WHERE id = 1").get() as Row | undefined;
-      return row ? { ...defaultSettings, ...parseJson<Partial<ApplicationSettings>>(row.value_json) } : defaultSettings;
+      if (!row) return defaultSettings;
+      const stored = parseJson<Partial<ApplicationSettings> & { syncNotesByDefault?: boolean }>(row.value_json);
+      const defaultPublicationKind = stored.defaultPublicationKind ?? (stored.syncNotesByDefault ? "apple-notes" : null);
+      const { syncNotesByDefault: _legacy, ...current } = stored;
+      return { ...defaultSettings, ...current, defaultPublicationKind };
     });
   }
   async save(settings: ApplicationSettings): Promise<void> {
@@ -383,4 +393,16 @@ export class SqliteSettingsRepository implements SettingsRepository {
         .run(JSON.stringify(settings), new Date().toISOString());
     });
   }
+}
+
+function serializePublicationTarget(target: PublicationTarget | null): string | null {
+  return target ? JSON.stringify(target) : null;
+}
+
+function deserializePublicationTarget(value: unknown): PublicationTarget | null {
+  if (value === null || value === undefined) return null;
+  const parsed = parseJson<Record<string, unknown>>(value);
+  if (parsed.kind === "apple-notes") return new AppleNotesPublicationTarget(parsed.account === null ? null : String(parsed.account), String(parsed.folder));
+  if (parsed.kind === "notion") return new NotionPublicationTarget(String(parsed.parentPageId));
+  throw new DomainError("INVALID_PUBLICATION_TARGET", "Stored publication target is invalid.");
 }

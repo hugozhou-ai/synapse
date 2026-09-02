@@ -3,15 +3,19 @@ import { z } from "zod";
 import type { ElectronApplicationContainer } from "./container";
 import type { ElectronWindowManager } from "./window-manager";
 import { DomainError } from "@domain/shared";
-import { PublicationTarget } from "@domain/summary";
+import { AppleNotesPublicationTarget, NotionPublicationTarget } from "@domain/summary";
 import type { ApplicationSettingsUpdate, SummarySearchCriteria } from "@application/ports";
 import type { SaveProfileCommand } from "@application/contracts";
 import { WIDGET_COLLAPSED_SIZE, WIDGET_EXPANDED_WIDTH, WIDGET_MAX_HEIGHT } from "@shared/widget-layout";
 
 const idSchema = z.string().min(1);
+const codexThreadIdSchema = z.string().uuid();
 const summaryContentSchema = z.object({ title: z.string().min(1), abstract: z.string(), bodyMarkdown: z.string(), tags: z.array(z.string()) });
 const searchSchema = z.object({ text: z.string().optional(), cwd: z.string().optional(), profileId: z.string().optional(), status: z.string().optional(), from: z.string().optional(), to: z.string().optional(), limit: z.number().int().min(1).max(200), offset: z.number().int().min(0) });
-const publicationTargetSchema = z.object({ account: z.string().nullable(), folder: z.string().min(1) }).nullable();
+const publicationTargetSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("apple-notes"), account: z.string().nullable(), folder: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("notion"), parentPageId: z.string().min(1) }).strict(),
+]).nullable();
 const destinationSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("new"), profileId: idSchema, publicationTarget: publicationTargetSchema }).strict(),
   z.object({ kind: z.literal("existing"), targetDocumentId: idSchema }).strict(),
@@ -19,8 +23,9 @@ const destinationSchema = z.discriminatedUnion("kind", [
 const generateSchema = z.object({ sessionId: idSchema, selectedTurnIds: z.array(idSchema).min(1), model: z.string().nullable(), destination: destinationSchema }).strict();
 const regenerateSchema = z.object({ documentId: idSchema, model: z.string().nullable() }).strict();
 const settingsSchema = z.object({
-  codexBinaryPath: z.string().nullable(), summaryModel: z.string().nullable(), syncNotesByDefault: z.boolean(),
-  notesAccount: z.string().nullable(), notesFolder: z.string().min(1), widgetVisible: z.boolean(),
+  codexBinaryPath: z.string().nullable(), summaryModel: z.string().nullable(),
+  notesAccount: z.string().nullable(), notesFolder: z.string().min(1), defaultPublicationKind: z.enum(["apple-notes", "notion"]).nullable(),
+  notionParentPageId: z.string(), widgetVisible: z.boolean(),
   widgetPositions: z.record(z.string(), z.object({ x: z.number(), y: z.number() })), widgetDisplayId: z.string().nullable(),
 }).partial();
 const rendererErrorSchema = z.object({
@@ -36,9 +41,14 @@ export class ElectronIpcController {
     this.handle("sessions:list", z.unknown(), () => this.container.sessionQueries.listWidgetQueue());
     this.handle("sessions:turns", idSchema, (id) => this.container.sessionQueries.getConversationTurns(id));
     this.handle("sessions:ignore", idSchema, async (id) => { await this.container.sessionAwareness.ignore(id); this.windows.broadcastSessionsChanged(); });
+    this.handle("sessions:open-in-codex", codexThreadIdSchema, (threadId) => this.container.codexSessions.open(threadId));
     this.handle("summaries:generate", generateSchema, async (value) => {
       const destination = value.destination.kind === "new"
-        ? { ...value.destination, publicationTarget: value.destination.publicationTarget ? new PublicationTarget(value.destination.publicationTarget.account, value.destination.publicationTarget.folder) : null }
+        ? { ...value.destination, publicationTarget: value.destination.publicationTarget?.kind === "apple-notes"
+          ? new AppleNotesPublicationTarget(value.destination.publicationTarget.account, value.destination.publicationTarget.folder)
+          : value.destination.publicationTarget?.kind === "notion"
+            ? new NotionPublicationTarget(value.destination.publicationTarget.parentPageId)
+            : null }
         : value.destination;
       return this.container.summaryGeneration.generateDraft({ ...value, destination });
     });
@@ -49,8 +59,10 @@ export class ElectronIpcController {
     });
     this.handle("summaries:search", searchSchema, (value) => this.container.summaryQueries.search(compactObject<SummarySearchCriteria>(value)));
     this.handle("summaries:get", idSchema, (id) => this.container.summaryQueries.getDocument(id));
+    this.handle("summaries:source", z.object({ documentId: idSchema, versionId: idSchema }).strict(), (value) => this.container.summaryQueries.getVersionSource(value.documentId, value.versionId));
+    this.handle("summaries:copy-reference", z.object({ documentId: idSchema, versionId: idSchema }).strict(), (value) => this.container.summaryReferences.copy(value.documentId, value.versionId));
     this.handle("summaries:delete", idSchema, async (id) => { await this.container.summaryDeletion.delete(id); this.windows.broadcastSessionsChanged(); });
-    this.handle("summaries:retry-notes", idSchema, (id) => this.container.summaryPublication.retry(id));
+    this.handle("summaries:retry-publication", idSchema, (id) => this.container.summaryPublication.retry(id));
     this.handle("profiles:list", z.unknown(), () => this.container.profiles.list());
     this.handle("profiles:save", z.object({ id: idSchema.optional(), name: z.string().min(1), kind: z.enum(["template", "systemPrompt"]), instructions: z.string().min(1), isDefault: z.boolean() }), (value) => this.container.profiles.save(compactObject<SaveProfileCommand>(value)));
     this.handle("profiles:delete", idSchema, (id) => this.container.profiles.delete(id));
@@ -58,12 +70,15 @@ export class ElectronIpcController {
     this.handle("settings:update", settingsSchema, (value) => this.container.settings.update(compactObject<ApplicationSettingsUpdate>(value)));
     this.handle("settings:models", z.unknown(), () => this.container.settings.listModels());
     this.handle("settings:notes-targets", z.unknown(), () => this.container.settings.listNotesTargets());
+    this.handle("settings:notion-connection", z.unknown(), () => this.container.settings.inspectNotionConnection());
     this.handle("settings:runtime", z.unknown(), () => this.container.settings.runtime());
     this.handle("hooks:inspect", z.unknown(), () => this.container.hookManagement.inspect());
     this.handle("hooks:install", z.unknown(), () => this.container.hookManagement.install());
     this.handle("hooks:trust", z.unknown(), () => this.container.hookManagement.trust());
     this.handle("hooks:uninstall", z.unknown(), () => this.container.hookManagement.uninstall());
     this.handle("hooks:dismiss-onboarding", z.unknown(), () => this.container.hookManagement.dismissOnboarding());
+    this.handle("plugin:inspect", z.unknown(), () => this.container.codexPlugin.inspect());
+    this.handle("plugin:install", z.unknown(), () => this.container.codexPlugin.install());
     this.handle("export:markdown", idSchema, (id) => this.container.exports.markdown(id));
     this.handle("export:json", idSchema, (id) => this.container.exports.json(id));
     this.handle("export:reveal-database", z.unknown(), () => this.container.exports.revealDatabaseDirectory());

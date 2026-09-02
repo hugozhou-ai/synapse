@@ -11,10 +11,10 @@ describe("SummaryComposer destinations", () => {
     Object.defineProperty(window, "synapse", { configurable: true, value: {
       sessions: { turns: vi.fn().mockResolvedValue({ turns: [{ id: "turn", sequence: 0, status: "completed", promptPreview: "prompt", assistantPreview: "result", startedAt: "a", completedAt: "b", selectedByDefault: true }] }) },
       profiles: { list: vi.fn().mockResolvedValue([{ id: "profile", name: "Profile", kind: "template", instructions: "# Template", isDefault: true }]) },
-      settings: { read: vi.fn().mockResolvedValue({ codexBinaryPath: null, summaryModel: "model", syncNotesByDefault: false, notesAccount: null, notesFolder: "Synapse", widgetVisible: true, widgetPositions: {}, widgetDisplayId: null, hookSetupAcknowledged: false }) },
+      settings: { read: vi.fn().mockResolvedValue({ codexBinaryPath: null, summaryModel: "model", defaultPublicationKind: null, notionParentPageId: "", notesAccount: null, notesFolder: "Synapse", widgetVisible: true, widgetPositions: {}, widgetDisplayId: null, hookSetupAcknowledged: false }) },
       summaries: {
-        search: vi.fn().mockResolvedValue({ total: 1, items: [{ documentId: "target", sessionId: "owner", title: "Existing title", abstract: "Existing abstract", tags: [], cwd: "/repo", profileId: "profile", versionKind: "final", notesLinked: true, updatedAt: "now" }] }),
-        get: vi.fn().mockResolvedValue({ id: "target", publicationStatus: "published", notesLinked: true, currentVersion: { id: "base", kind: "final", generationMode: "new", sourceSessionId: "owner", sourceTurnIds: ["old-turn"], baseVersionId: null, content: { title: "Existing title", abstract: "Existing abstract", bodyMarkdown: "# Existing\n\nKeep", tags: [] }, createdAt: "now" }, versions: [] }),
+        search: vi.fn().mockResolvedValue({ total: 1, items: [{ documentId: "target", sessionId: "owner", title: "Existing title", abstract: "Existing abstract", tags: [], cwd: "/repo", profileId: "profile", versionKind: "final", notesLinked: true, notionLinked: false, publisher: "apple-notes", updatedAt: "now" }] }),
+        get: vi.fn().mockResolvedValue({ id: "target", reference: { uri: "synapse://summary/target?v=base", text: "[[Synapse:Existing title|synapse://summary/target?v=base]]" }, publicationStatus: "published", notesLinked: true, notionLinked: false, publisher: "apple-notes", currentVersion: { id: "base", kind: "final", generationMode: "new", sourceSessionId: "owner", sourceTurnIds: ["old-turn"], baseVersionId: null, content: { title: "Existing title", abstract: "Existing abstract", bodyMarkdown: "# Existing\n\nKeep", tags: [] }, createdAt: "now" }, versions: [] }),
         generate,
       },
     } });
@@ -32,6 +32,27 @@ describe("SummaryComposer destinations", () => {
     fireEvent.click(submit);
     await waitFor(() => expect(generate).toHaveBeenCalledWith({
       sessionId: "source", selectedTurnIds: ["turn"], model: "model", destination: { kind: "existing", targetDocumentId: "target" },
+    }));
+  });
+
+  it("sends a Notion parent page target for a new summary", async () => {
+    const generate = vi.fn().mockResolvedValue({ documentId: "doc", versionId: "draft", content: { title: "Title", abstract: "", bodyMarkdown: "Body", tags: [] } });
+    Object.defineProperty(window, "synapse", { configurable: true, value: {
+      sessions: { turns: vi.fn().mockResolvedValue({ turns: [{ id: "turn", sequence: 0, status: "completed", promptPreview: "prompt", assistantPreview: "result", startedAt: "a", completedAt: "b", selectedByDefault: true }] }) },
+      profiles: { list: vi.fn().mockResolvedValue([{ id: "profile", name: "Profile", kind: "template", instructions: "# Template", isDefault: true }]) },
+      settings: { read: vi.fn().mockResolvedValue({ codexBinaryPath: null, summaryModel: "model", defaultPublicationKind: null, notionParentPageId: "", notesAccount: null, notesFolder: "Synapse", widgetVisible: true, widgetPositions: {}, widgetDisplayId: null, hookSetupAcknowledged: false }) },
+      summaries: { generate },
+    } });
+
+    render(<SummaryComposer sessionId="source" onClose={() => undefined} />);
+    const publication = await screen.findByRole("combobox", { name: "外部发布" });
+    fireEvent.click(publication);
+    fireEvent.click(screen.getByRole("option", { name: "Notion" }));
+    fireEvent.change(screen.getByPlaceholderText("页面 URL 或页面 ID"), { target: { value: "https://notion.so/Parent-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" } });
+    fireEvent.click(screen.getByRole("button", { name: "总结" }));
+    await waitFor(() => expect(generate).toHaveBeenCalledWith({
+      sessionId: "source", selectedTurnIds: ["turn"], model: "model",
+      destination: { kind: "new", profileId: "profile", publicationTarget: { kind: "notion", parentPageId: "https://notion.so/Parent-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" } },
     }));
   });
 });

@@ -30,7 +30,7 @@ app.whenReady().then(async () => {
   windows = new ElectronWindowManager(container.settings, container.hookManagement, container.logger);
   new ElectronIpcController(container, windows).register();
   await container.hookReceiver.start();
-  container.notesWorker.start();
+  container.publicationWorker.start();
   await windows.start();
   container.logger.info("[synapse:main]", "application-ready", {});
   app.on("activate", () => { void windows?.openHistory(); });

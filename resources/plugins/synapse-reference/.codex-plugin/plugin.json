@@ -1,0 +1,20 @@
+{
+  "name": "synapse-reference",
+  "version": "0.1.0",
+  "description": "Resolve explicit Synapse summary references without loading knowledge by default.",
+  "author": {
+    "name": "Synapse Contributors"
+  },
+  "license": "MIT",
+  "keywords": ["synapse", "summaries", "references", "local-first"],
+  "interface": {
+    "displayName": "Synapse Reference",
+    "shortDescription": "Resolve explicitly pasted Synapse references",
+    "longDescription": "Reads only the exact local Synapse summary version referenced by the user, with metadata, abstract, outline, section, and bounded full-content views.",
+    "defaultPrompt": "Resolve only the Synapse references explicitly included in the user's message, and request the smallest useful view first.",
+    "developerName": "Synapse Contributors",
+    "category": "Productivity",
+    "capabilities": ["Read"]
+  },
+  "mcpServers": "./.mcp.json"
+}

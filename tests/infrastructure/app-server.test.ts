@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { CodexAppServerRpcError, CodexAppServerTransportError, JsonRpcRequestRegistry, type CodexAppServerClient, type CodexNotification } from "@infrastructure/app-server/client";
-import { AppServerHookTrustGateway, CodexAppServerSummaryAgentGateway } from "@infrastructure/app-server/gateways";
+import { CodexAppServerRpcError, CodexAppServerTransportError, createMcpApprovalResponse, JsonRpcRequestRegistry, type CodexAppServerClient, type CodexNotification } from "@infrastructure/app-server/client";
+import { AppServerHookTrustGateway, CodexAppServerNotionPublisher, CodexAppServerSummaryAgentGateway, normalizeNotionPageId } from "@infrastructure/app-server/gateways";
 import { CodexAppServerSupervisor } from "@infrastructure/app-server/supervisor";
 import { SummaryProfile } from "@domain/summary";
+import { NotionPublicationTarget, SourceRevision, SummaryVersion } from "@domain/summary";
 import type { Logger } from "@shared/logger";
 
 const logger: Logger = { info() {}, error() {} };
@@ -12,6 +13,16 @@ describe("App Server adapters", () => {
     const registry = new JsonRpcRequestRegistry(); const pending = registry.create(1_000);
     registry.resolve(pending.id, { ok: true });
     await expect(pending.promise).resolves.toEqual({ ok: true });
+  });
+
+  it("accepts MCP approval only for an explicitly authorized publication thread", () => {
+    const params = {
+      threadId: "notion-thread",
+      questions: [{ id: "approval", options: [{ label: "Accept" }, { label: "Decline" }] }],
+    };
+    expect(createMcpApprovalResponse(params, (threadId) => threadId === "notion-thread"))
+      .toEqual({ answers: { approval: { answers: ["Accept"] } } });
+    expect(createMcpApprovalResponse(params, () => false)).toEqual({ answers: {} });
   });
 
   it("captures a completion emitted before turn/start returns and uses a fixed output schema", async () => {
@@ -180,6 +191,115 @@ describe("App Server adapters", () => {
     expect(requests.find((request) => request.method === "turn/interrupt")?.params).toEqual({ threadId: "thread", turnId: "turn" });
     for (const listener of listeners) listener({ method: "turn/completed", params: { threadId: "thread", turn: { id: "turn", status: "interrupted", items: [] } } });
     await expect(generation).rejects.toThrow(/interrupted/);
+  });
+
+  it("creates a Notion page through the App Server MCP endpoint and retains its page id", async () => {
+    const requests: Array<{ method: string; params: unknown }> = [];
+    const client = fakeClient(async (method, params) => {
+      requests.push({ method, params });
+      if (method === "thread/start") return { thread: { id: "publication-thread" } };
+      if (method === "mcpServerStatus/list") return { data: [{ name: "codex_apps", tools: { "notion.notion-create-pages": {}, "notion.notion-update-page": {} } }] };
+      if (method === "mcpServer/tool/call") return { content: [{ type: "text", text: JSON.stringify({ pages: [{ id: "12345678-1234-1234-1234-1234567890ab" }] }) }] };
+      return {};
+    });
+    const publisher = new CodexAppServerNotionPublisher(client, "/tmp/synapse-notion", logger);
+    const version = new SummaryVersion({ id: "version", documentId: "doc", sequence: 0, kind: "final", generationMode: "new", operation: "finalize", parentVersionId: null, baseVersionId: null, content: { title: "Title", abstract: "", bodyMarkdown: "## Body", tags: [] }, sourceRevision: new SourceRevision("session", ["turn"], "hash"), model: null, createdAt: "now" });
+    await expect(publisher.publish({ documentId: "doc", version, target: new NotionPublicationTarget("https://www.notion.so/Parent-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"), existingExternalId: null }))
+      .resolves.toEqual({ externalId: "123456781234123412341234567890ab", updated: false });
+    expect(requests.find((item) => item.method === "mcpServer/tool/call")?.params).toEqual({
+      threadId: "publication-thread", server: "codex_apps", tool: "notion.notion-create-pages",
+      arguments: { parent: { type: "page_id", page_id: "aaaaaaaabbbbccccddddeeeeeeeeeeee" }, pages: [{ properties: { title: "Title" }, content: "## Body" }] },
+    });
+  });
+
+  it("updates content and title on the existing Notion page", async () => {
+    const calls: unknown[] = [];
+    const client = fakeClient(async (method, params) => {
+      if (method === "thread/start") return { thread: { id: "publication-thread" } };
+      if (method === "mcpServerStatus/list") return { data: [{ name: "codex_apps", tools: { "notion.notion-update-page": {} } }] };
+      if (method === "mcpServer/tool/call") { calls.push(params); return { content: [] }; }
+      return {};
+    });
+    const publisher = new CodexAppServerNotionPublisher(client, "/tmp/synapse-notion", logger);
+    const version = new SummaryVersion({ id: "version", documentId: "doc", sequence: 1, kind: "final", generationMode: "merge", operation: "finalize", parentVersionId: "base", baseVersionId: "base", content: { title: "Updated", abstract: "", bodyMarkdown: "New body", tags: [] }, sourceRevision: new SourceRevision("session", ["turn"], "hash"), model: null, createdAt: "now" });
+    await expect(publisher.publish({ documentId: "doc", version, target: new NotionPublicationTarget("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"), existingExternalId: "page-id" }))
+      .resolves.toEqual({ externalId: "page-id", updated: true });
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toMatchObject({ tool: "notion.notion-update-page", arguments: { page_id: "page-id", command: "replace_content", new_str: "New body" } });
+    expect(calls[1]).toMatchObject({ tool: "notion.notion-update-page", arguments: { page_id: "page-id", command: "update_properties", properties: { title: "Updated" } } });
+  });
+
+  it("waits for an asynchronous Notion update before updating the title", async () => {
+    const calls: Array<{ tool?: string }> = [];
+    let polls = 0;
+    const client = fakeClient(async (method, params) => {
+      if (method === "thread/start") return { thread: { id: "publication-thread" } };
+      if (method === "mcpServerStatus/list") return { data: [{ name: "codex_apps", tools: { "notion.notion-update-page": {}, "notion.notion-get-async-task": {} } }] };
+      if (method === "mcpServer/tool/call") {
+        const call = params as { tool?: string };
+        calls.push(call);
+        if (call.tool === "notion.notion-get-async-task") {
+          polls += 1;
+          return { structuredContent: { async_task: { task_id: "task-1", status: polls === 1 ? "running" : "succeeded", poll_after_ms: 0 } } };
+        }
+        if (calls.filter((item) => item.tool === "notion.notion-update-page").length === 1) {
+          return { content: [{ type: "text", text: JSON.stringify({ async_task: { task_id: "task-1", status: "queued", poll_after_ms: 0 } }) }] };
+        }
+        return { content: [] };
+      }
+      return {};
+    });
+    const publisher = new CodexAppServerNotionPublisher(client, "/tmp/synapse-notion", logger, async () => undefined);
+    const version = new SummaryVersion({ id: "version", documentId: "doc", sequence: 1, kind: "final", generationMode: "merge", operation: "finalize", parentVersionId: "base", baseVersionId: "base", content: { title: "Updated", abstract: "", bodyMarkdown: "New body", tags: [] }, sourceRevision: new SourceRevision("session", ["turn"], "hash"), model: null, createdAt: "now" });
+
+    await publisher.publish({ documentId: "doc", version, target: new NotionPublicationTarget("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"), existingExternalId: "page-id" });
+
+    expect(calls.map((call) => call.tool)).toEqual([
+      "notion.notion-update-page",
+      "notion.notion-get-async-task",
+      "notion.notion-get-async-task",
+      "notion.notion-update-page",
+    ]);
+  });
+
+  it("stops publication when an asynchronous Notion update fails", async () => {
+    let updateCalls = 0;
+    const client = fakeClient(async (method, params) => {
+      if (method === "thread/start") return { thread: { id: "publication-thread" } };
+      if (method === "mcpServerStatus/list") return { data: [{ name: "codex_apps", tools: { "notion.notion-update-page": {}, "notion.notion-get-async-task": {} } }] };
+      if (method === "mcpServer/tool/call") {
+        const call = params as { tool?: string };
+        if (call.tool === "notion.notion-update-page") {
+          updateCalls += 1;
+          return { structuredContent: { async_task: { task_id: "task-1", status: "queued", poll_after_ms: 0 } } };
+        }
+        return { structuredContent: { async_task: { task_id: "task-1", status: "failed", error: "permission denied" } } };
+      }
+      return {};
+    });
+    const publisher = new CodexAppServerNotionPublisher(client, "/tmp/synapse-notion", logger, async () => undefined);
+    const version = new SummaryVersion({ id: "version", documentId: "doc", sequence: 1, kind: "final", generationMode: "merge", operation: "finalize", parentVersionId: "base", baseVersionId: "base", content: { title: "Updated", abstract: "", bodyMarkdown: "New body", tags: [] }, sourceRevision: new SourceRevision("session", ["turn"], "hash"), model: null, createdAt: "now" });
+
+    await expect(publisher.publish({ documentId: "doc", version, target: new NotionPublicationTarget("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"), existingExternalId: "page-id" }))
+      .rejects.toThrow("permission denied");
+    expect(updateCalls).toBe(1);
+  });
+
+  it("reports Notion as disconnected when the installed app is not callable", async () => {
+    const client = fakeClient(async (method) => {
+      if (method === "thread/start") return { thread: { id: "publication-thread" } };
+      if (method === "mcpServerStatus/list") return { data: [{ name: "codex_apps", tools: { "notion.notion-create-pages": {}, "notion.notion-update-page": {} } }] };
+      if (method === "app/installed") return { apps: [{ id: "notion-id", runtimeName: "Notion", enabled: true, callable: false }] };
+      return {};
+    });
+    const publisher = new CodexAppServerNotionPublisher(client, "/tmp/synapse-notion", logger);
+
+    await expect(publisher.inspectConnection()).resolves.toMatchObject({ available: true, connected: false, message: expect.stringContaining("不可调用") });
+  });
+
+  it("validates Notion parent page identifiers before calling MCP", () => {
+    expect(normalizeNotionPageId("https://notion.so/Page-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")).toBe("aaaaaaaabbbbccccddddeeeeeeeeeeee");
+    expect(() => normalizeNotionPageId("not a notion page")).toThrow("有效的 Notion 页面");
   });
 });
 

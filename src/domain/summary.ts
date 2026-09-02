@@ -3,7 +3,9 @@ import { DomainError } from "./shared";
 export type SummaryProfileKind = "template" | "systemPrompt";
 export type SummaryVersionKind = "agent-draft" | "edited-draft" | "final";
 export type SummaryGenerationMode = "new" | "merge";
+export type SummaryVersionOperation = "generate" | "merge" | "regenerate" | "manual-edit" | "finalize";
 export type PublicationStatus = "not-requested" | "pending" | "published" | "failed";
+export type PublisherKind = "apple-notes" | "notion";
 
 export class TurnSelection {
   readonly turnIds: readonly string[];
@@ -41,9 +43,19 @@ export class SourceRevision {
   }
 }
 
-export class PublicationTarget {
+export type PublicationTarget = AppleNotesPublicationTarget | NotionPublicationTarget;
+
+export class AppleNotesPublicationTarget {
+  readonly kind = "apple-notes" as const;
   constructor(readonly account: string | null, readonly folder: string) {
     if (!folder.trim()) throw new DomainError("INVALID_PUBLICATION_TARGET", "Apple Notes folder is required.");
+  }
+}
+
+export class NotionPublicationTarget {
+  readonly kind = "notion" as const;
+  constructor(readonly parentPageId: string) {
+    if (!parentPageId.trim()) throw new DomainError("INVALID_PUBLICATION_TARGET", "Notion parent page ID is required.");
   }
 }
 
@@ -53,6 +65,8 @@ export interface SummaryVersionProps {
   readonly sequence: number;
   readonly kind: SummaryVersionKind;
   readonly generationMode: SummaryGenerationMode;
+  readonly operation: SummaryVersionOperation;
+  readonly parentVersionId: string | null;
   readonly baseVersionId: string | null;
   readonly content: SummaryContent;
   readonly sourceRevision: SourceRevision;
@@ -65,7 +79,10 @@ export class SummaryVersion {
 
   constructor(props: SummaryVersionProps) {
     const content = Object.freeze({ ...props.content, tags: Object.freeze([...props.content.tags]) });
-    this.props = Object.freeze({ ...props, content });
+    this.props = Object.freeze({
+      ...props,
+      content,
+    });
   }
   get isFinal(): boolean { return this.props.kind === "final"; }
 }
@@ -136,5 +153,6 @@ export class SummaryDocumentAggregate {
     if (this.props.versions.some((item) => item.props.id === version.props.id)) {
       throw new DomainError("VERSION_IMMUTABLE", "A summary version cannot be replaced.");
     }
+    if (version.props.parentVersionId !== this.props.currentVersionId) throw new DomainError("VERSION_PARENT_MISMATCH", "Version parent must be the current version.");
   }
 }
