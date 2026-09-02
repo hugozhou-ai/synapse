@@ -49,6 +49,7 @@ Edit and finalize → History / Markdown / JSON / Apple Notes
 - **Structured summaries**: Produces a title, abstract, Markdown body, and tags through a fixed JSON Schema; long conversations are chunked at turn boundaries without silently dropping sources.
 - **Existing-content merge**: Searches the complete local archive and folds verified facts into the full target document. Merge mode does not use a summary profile and rejects stale base versions instead of overwriting concurrent edits.
 - **Traceable history**: Uses SQLite WAL storage, immutable versions, FTS5 full-text search, and Markdown / JSON export.
+- **Explicit Codex references**: Copies or drags a compact immutable `synapse://summary/...` reference into a prompt. The optional bundled plugin exposes one read-only MCP tool and lets Codex request only the smallest useful content layer after that reference is supplied.
 - **Apple Notes sync**: New summaries can select an account and folder. A merged document updates its existing bound note only after finalization, and failed publications remain available for explicit retry.
 - **Least-privilege execution**: Runs the summary agent in a read-only sandbox and an isolated empty directory, with explicit instructions not to call tools, read or write files, or access the network.
 
@@ -80,6 +81,8 @@ npm run dev
 4. Start or resume a Codex task. The widget should show it as active after a prompt is submitted; when the task stops, its card moves to the top and exposes the summary action.
 5. Choose turns, then either use a summary profile to create new content or search and merge into existing content without a profile. After editing and finalizing it, the result can be searched, regenerated, or exported from history.
 
+To reference a summary from another Codex task, explicitly install the bundled plugin from **Settings → Codex Reference Plugin**, start a new Codex task, then copy or drag **Reference** from a history detail into the prompt. Installation does not inject summary bodies into new tasks: the read-only MCP server resolves only a reference present in the user's message and returns metadata, an abstract, an outline, one section, or bounded full content as requested by Codex.
+
 To use Apple Notes, choose a target account and folder in Settings, then allow Synapse to control Notes when macOS displays its first permission prompt.
 
 Uninstalling the Hook removes only the Synapse handlers recorded in its manifest. Existing user Hook configuration remains intact.
@@ -98,6 +101,8 @@ Markdown stored in SQLite is the sole source of truth for summary content. Apple
 | Runtime log | `~/Library/Application Support/Synapse/logs/synapse.log` |
 | Offline events | `~/Library/Application Support/Synapse/spool/` |
 | Hook manifest and backups | `~/Library/Application Support/Synapse/` |
+| Installed reference plugin | `~/plugins/synapse-reference/` |
+| Personal plugin marketplace | `~/.agents/plugins/marketplace.json` |
 
 ## Verification and builds
 

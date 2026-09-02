@@ -8,6 +8,7 @@ import { DestinationAwareSummaryGenerationService, OutboxSummaryPublicationServi
 import { ArbitraryTurnSelectionService, DefaultSessionLifecycleService, NormalizedTurnSummaryContextService } from "@domain/services";
 import { appServerAgentRuntimeDirectory, LazyCodexAppServerRuntime } from "@infrastructure/app-server/runtime";
 import { ElectronExportGateway } from "@infrastructure/electron/export-gateway";
+import { ElectronTextClipboardGateway } from "@infrastructure/electron/clipboard-gateway";
 import { JsonCodexHookConfigStore } from "@infrastructure/hooks/config-store";
 import { CodexHookProtocolMapper } from "@infrastructure/hooks/mapper";
 import { UnixSocketHookEventReceiver, type HookEventReceiver } from "@infrastructure/hooks/receiver";
@@ -21,6 +22,9 @@ import { SqliteCodexSessionRepository, SqliteCodexTurnRepository, SqliteHookEven
 import { SqliteUnitOfWork } from "@infrastructure/sqlite/unit-of-work";
 import { NodeContentHashService, SystemClock, UuidGenerator } from "@infrastructure/system";
 import { CompositeLogger, JsonConsoleLogger, type Logger } from "@shared/logger";
+import { RepositorySummaryReferenceService, type SummaryReferenceService } from "@application/summary-reference";
+import { FileSystemCodexPluginManagement } from "@infrastructure/plugins/codex-plugin-management";
+import type { CodexPluginManagement } from "@application/ports";
 
 export class ElectronApplicationContainer {
   readonly sessionAwareness!: SessionAwarenessService;
@@ -34,6 +38,8 @@ export class ElectronApplicationContainer {
   readonly settings!: SettingsApplicationService;
   readonly hookManagement!: HookManagementService;
   readonly exports!: ExportApplicationService;
+  readonly summaryReferences!: SummaryReferenceService;
+  readonly codexPlugin!: CodexPluginManagement;
   readonly hookReceiver!: HookEventReceiver;
   readonly notesWorker!: NotesOutboxWorker;
   readonly logger!: Logger;
@@ -102,6 +108,8 @@ export class ElectronApplicationContainer {
       settings: new PersistentSettingsApplicationService(settingsRepository, appServer, appServer, notes, unitOfWork),
       hookManagement,
       exports: new SystemExportApplicationService(summaries, new ElectronExportGateway(databasePath)),
+      summaryReferences: new RepositorySummaryReferenceService(summaries, new ElectronTextClipboardGateway()),
+      codexPlugin: new FileSystemCodexPluginManagement(resourcePath(app, "plugins/synapse-reference"), homedir(), settingsValue.codexBinaryPath, logger),
       hookReceiver: receiver,
       notesWorker,
       logger,

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { BookOpen, Code2, NotebookPen, Plus, ShieldCheck, Sparkles, Trash2, X } from "lucide-react";
-import type { AgentModel, ApplicationSettings, AppServerRuntimeStatus, HookInstallationStatus } from "@application/ports";
+import { BookOpen, Code2, NotebookPen, PackageCheck, Plus, ShieldCheck, Sparkles, Trash2, X } from "lucide-react";
+import type { AgentModel, ApplicationSettings, AppServerRuntimeStatus, CodexPluginInstallationStatus, HookInstallationStatus } from "@application/ports";
 import type { NotesTargetsView, SummaryProfileView } from "@application/contracts";
 import { ErrorBanner, InfoBanner, PageHeader } from "../../components/common";
 import { NotesTargetPicker } from "../../components/NotesTargetPicker";
@@ -11,6 +11,7 @@ import { HookTrustDialog } from "./HookTrustDialog";
 export function SettingsPage() {
   const [settings, setSettings] = useState<ApplicationSettings | null>(null);
   const [hooks, setHooks] = useState<HookInstallationStatus | null>(null);
+  const [plugin, setPlugin] = useState<CodexPluginInstallationStatus | null>(null);
   const [profiles, setProfiles] = useState<readonly SummaryProfileView[]>([]);
   const [models, setModels] = useState<readonly AgentModel[]>([]);
   const [notesTargets, setNotesTargets] = useState<NotesTargetsView | null>(null);
@@ -23,8 +24,8 @@ export function SettingsPage() {
   const [reviewingHookTrust, setReviewingHookTrust] = useState(false);
 
   const reload = useCallback(() => {
-    void Promise.all([window.synapse.settings.read(), window.synapse.settings.runtime(), window.synapse.hooks.inspect(), window.synapse.profiles.list()])
-      .then(([nextSettings, nextRuntime, nextHooks, nextProfiles]) => { setSettings(nextSettings); setRuntime(nextRuntime); setHooks(nextHooks); setProfiles(nextProfiles); })
+    void Promise.all([window.synapse.settings.read(), window.synapse.settings.runtime(), window.synapse.hooks.inspect(), window.synapse.plugin.inspect(), window.synapse.profiles.list()])
+      .then(([nextSettings, nextRuntime, nextHooks, nextPlugin, nextProfiles]) => { setSettings(nextSettings); setRuntime(nextRuntime); setHooks(nextHooks); setPlugin(nextPlugin); setProfiles(nextProfiles); })
       .catch((reason) => setError(messageOf(reason)));
     void window.synapse.settings.models().then(setModels).catch((reason) => setError(messageOf(reason)));
     void window.synapse.settings.notesTargets().then((value) => { setNotesTargets(value); setNotesError(null); }).catch((reason) => setNotesError(messageOf(reason)));
@@ -50,6 +51,7 @@ export function SettingsPage() {
   const hookAction = async (install: boolean) => { setSaving(true); setError(null); try { const next = install ? await window.synapse.hooks.install() : await window.synapse.hooks.uninstall(); setHooks(next); setReviewingHookTrust(install && pendingTrustHooks(next).length > 0); } catch (reason) { setError(messageOf(reason)); } finally { setSaving(false); } };
   const trustHooks = async () => { setSaving(true); setError(null); try { const next = await window.synapse.hooks.trust(); setHooks(next); if (next.trusted) setReviewingHookTrust(false); } catch (reason) { setError(messageOf(reason)); } finally { setSaving(false); } };
   const dismissHookOnboarding = async () => { setSaving(true); setError(null); try { setHooks(await window.synapse.hooks.dismissOnboarding()); } catch (reason) { setError(messageOf(reason)); } finally { setSaving(false); } };
+  const installPlugin = async () => { setSaving(true); setError(null); try { setPlugin(await window.synapse.plugin.install()); } catch (reason) { setError(messageOf(reason)); } finally { setSaving(false); } };
   const saveProfile = async () => { if (!editing) return; try { await window.synapse.profiles.save(editing); setEditing(null); setConfirmingDelete(false); reload(); } catch (reason) { setError(messageOf(reason)); } };
   const deleteProfile = async () => {
     if (!editing?.id || editing.id === "builtin-task-retrospective") return;
@@ -72,6 +74,10 @@ export function SettingsPage() {
         {hooks.trustStates.length > 0 && <div className="trust-list">{hooks.trustStates.map((state) => <span key={state.cwd}><code>{shortPath(state.cwd)}</code><em className={state.status}>{state.status}</em></span>)}</div>}
         <div className="row-actions">{pendingHooks.length > 0 && <button className="primary" disabled={saving} onClick={() => setReviewingHookTrust(true)}><ShieldCheck size={14} />检查并信任</button>}{hooks.installed ? <button className="danger" disabled={saving} onClick={() => hookAction(false)}><Trash2 size={14} />卸载自有 Hook</button> : <button className="primary" disabled={saving} onClick={() => hookAction(true)}><Plus size={14} />{hooks.message?.includes("安装不完整") ? "修复安装" : "安装 Hook"}</button>}</div>
       </> : <div className="hook-status-loading" role="status">正在检测 Hook 状态…</div>}
+    </section>
+    <section className="settings-section">
+      <div className="settings-title"><div className="setting-icon"><PackageCheck size={18} /></div><div><h2>Codex 引用插件</h2><p>仅在你粘贴 Synapse 引用后按需读取；不会默认注入总结正文。</p></div>{plugin && <span className={`health ${plugin.current ? "good" : "warn"}`}>{plugin.current ? "已安装" : plugin.installed ? "可更新" : "未安装"}</span>}</div>
+      {plugin ? <><div className="hook-paths"><code>{plugin.pluginPath}</code><code>{plugin.marketplacePath}</code><code>随包版本：{plugin.bundledVersion}{plugin.installedVersion ? ` · 已安装：${plugin.installedVersion}` : ""}</code></div>{plugin.message && (plugin.current ? <InfoBanner message={plugin.message} /> : <ErrorBanner message={plugin.message} />)}<div className="row-actions"><button className="primary" disabled={saving || plugin.current} onClick={installPlugin}><Plus size={14} />{plugin.installed ? "更新引用插件" : "安装引用插件"}</button></div></> : <div className="hook-status-loading" role="status">正在检测引用插件…</div>}
     </section>
     <section className="settings-section"><div className="settings-title"><div className="setting-icon"><NotebookPen size={18} /></div><div><h2>Apple Notes</h2><p>仅在 final 版本提交后同步，同一文档持续更新同一便签。</p></div></div><label className="toggle-row"><input type="checkbox" checked={settings?.syncNotesByDefault ?? false} onChange={(event) => settings && setSettings({ ...settings, syncNotesByDefault: event.target.checked })} /><span className="toggle" /><div><strong>默认同步到便签</strong><small>总结面板仍可单次覆盖</small></div></label>{notesError && <ErrorBanner message={`无法读取 Notes 目标：${notesError}`} />}{settings && <NotesTargetPicker targets={notesTargets} account={settings.notesAccount ?? ""} folder={settings.notesFolder} onAccountChange={(value) => setSettings({ ...settings, notesAccount: value || null })} onFolderChange={(value) => setSettings({ ...settings, notesFolder: value })} />}</section>
     <section className="settings-section"><div className="settings-title"><div className="setting-icon"><BookOpen size={18} /></div><div><h2>整理方案</h2><p>模板型保持 Markdown 骨架，系统提示词型提供完整规则。</p></div><button className="secondary push" onClick={() => { setConfirmingDelete(false); setEditing({ id: "", name: "", kind: "template", instructions: "", isDefault: false }); }}><Plus size={14} />新建</button></div><div className="profile-list">{profiles.map((profile) => <button key={profile.id} onClick={() => { setConfirmingDelete(false); setEditing(profile); }}><div><strong>{profile.name}</strong><span>{profile.kind === "template" ? "Markdown 模板" : "系统提示词"}</span></div>{profile.isDefault && <em>默认</em>}</button>)}</div></section>

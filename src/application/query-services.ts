@@ -2,6 +2,7 @@ import { SummaryProfile } from "@domain/summary";
 import type { AgentModel, ApplicationSettings, ApplicationSettingsUpdate, AppServerRuntimeStatus, AppServerRuntimeStatusProvider, Clock, CodexSessionRepository, ExportGateway, IdGenerator, NotesTargetGateway, PublicationRepository, SettingsRepository, SummaryAgentGateway, SummaryDocumentRepository, SummaryJobRepository, SummaryProfileRepository, SummarySearchCriteria, SummarySearchResult, UnitOfWork } from "./ports";
 import type { ConversationTurnsView, NotesTargetsView, SaveProfileCommand, SummaryDetailView, SummaryProfileView, WidgetSessionView } from "./contracts";
 import { DomainError } from "@domain/shared";
+import { formatSummaryReference } from "./summary-reference";
 
 export interface SessionQueryService {
   listWidgetQueue(): Promise<readonly WidgetSessionView[]>;
@@ -73,6 +74,7 @@ export class RepositorySummaryQueryService implements SummaryQueryService {
     const publication = await this.publications.find(document.id, "apple-notes");
     return {
       id: document.id,
+      reference: current ? formatSummaryReference(document.id, current.props.id, current.props.content.title) : null,
       publicationStatus: document.snapshot.publicationStatus,
       notesLinked: Boolean(publication?.externalId),
       currentVersion: current ? {

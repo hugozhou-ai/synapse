@@ -49,6 +49,7 @@ Codex App Server 生成结构化草稿
 - **结构化总结**：使用固定 JSON Schema 生成标题、摘要、正文和标签；长会话按 turn 边界分块，不静默截断来源。
 - **融合已有内容**：可搜索全部历史总结并将新事实精炼地融入完整原文；已有模式不使用整理方案，并通过基础版本校验避免覆盖并发编辑。
 - **可追溯历史**：SQLite WAL 持久化、不可变版本记录、FTS5 全文搜索，以及 Markdown / JSON 导出。
+- **显式 Codex 引用**：把紧凑、不可变的 `synapse://summary/...` 引用复制或拖入 prompt。可选的随包插件只暴露一个只读 MCP 工具，并且只在提供引用后，让 Codex 请求最小必要的内容层级。
 - **Apple Notes 同步**：新建内容可选择账户与文件夹；融合已有内容时，确认 final 后自动更新该总结已绑定的同一条便签，失败后由用户手动重试。
 - **最小权限运行**：总结 agent 使用只读 sandbox 与独立空目录，并被明确约束不得调用工具、读写文件或访问网络。
 
@@ -80,6 +81,8 @@ npm run dev
 4. 新建或恢复一个 Codex 任务。提交 prompt 后，挂件应立即显示进行中；任务停止后，卡片会置顶并出现“总结”。
 5. 选择 turns 后，可使用整理方案新建内容，或在不选择整理方案的情况下搜索并融合到已有内容；编辑并确认 final 后，可在历史中检索、重新生成或导出。
 
+若要在另一个 Codex 任务中引用总结，请先在“设置 → Codex 引用插件”中显式安装随包插件，再新建 Codex 任务。在历史详情中点击“引用”可复制不可变标识，也可直接把按钮拖入输入框。安装插件不会向新任务默认注入总结正文；其只读 MCP 只解析用户消息中出现的引用，并按 Codex 请求返回元数据、摘要、目录、单个章节或有长度上限的全文。
+
 如需 Apple Notes，在设置中选择目标账户与文件夹，并在 macOS 首次权限提示中允许 Synapse 控制“便签”。
 
 卸载 Hook 只会删除 manifest 中标记的 Synapse handlers，用户原有的 Hook 配置会保留。
@@ -98,6 +101,8 @@ SQLite 中的 Markdown 是总结内容的唯一主存储。Apple Notes 是与总
 | 运行日志 | `~/Library/Application Support/Synapse/logs/synapse.log` |
 | 离线事件 | `~/Library/Application Support/Synapse/spool/` |
 | Hook manifest 与备份 | `~/Library/Application Support/Synapse/` |
+| 已安装的引用插件 | `~/plugins/synapse-reference/` |
+| 个人插件 marketplace | `~/.agents/plugins/marketplace.json` |
 
 ## 验证与构建
 

@@ -47,6 +47,13 @@
 - 导出 Markdown/JSON，检查内容与当前版本一致。
 - “数据库目录”只在 Finder 中显示目录，不移动活动 SQLite 文件。
 
+## Codex 总结引用
+
+- 未点击安装前，确认设置页只显示插件状态，不修改 `~/plugins` 或 `~/.agents/plugins/marketplace.json`。
+- 点击“安装引用插件”，确认个人 marketplace 中原有字段和插件仍保留，`synapse-reference@personal` 已启用；更新应用后应显示“可更新”，再次安装后版本带新的 `+codex.<hash>` 后缀。
+- 新建 Codex 任务，在历史详情点击“引用”并粘贴，确认 prompt 只含紧凑的 `[[Synapse:标题|synapse://summary/<document>?v=<version>]]`，不含总结正文；拖拽按钮应得到相同文本。
+- 让 Codex 先读取 metadata 或 outline，再读取单个 section；确认 MCP 不提供总结枚举能力、不会读取其他版本，并且 full 返回值遵守 `maxChars` 上限。
+
 ## Apple Notes
 
 - 首次 final + 同步时允许 macOS 自动化权限，确认目标文件夹中只创建一个便签。

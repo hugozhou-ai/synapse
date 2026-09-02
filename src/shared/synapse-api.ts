@@ -1,4 +1,4 @@
-import type { AgentModel, ApplicationSettings, ApplicationSettingsUpdate, AppServerRuntimeStatus, HookInstallationStatus, SummarySearchCriteria, SummarySearchResult } from "@application/ports";
+import type { AgentModel, ApplicationSettings, ApplicationSettingsUpdate, AppServerRuntimeStatus, CodexPluginInstallationStatus, HookInstallationStatus, SummarySearchCriteria, SummarySearchResult } from "@application/ports";
 import type { ConversationTurnsView, FinalizeSummaryCommand, FinalizedSummaryView, GenerateSummaryCommand, NotesTargetsView, RegenerateSummaryCommand, RendererErrorReport, SaveProfileCommand, SummaryDetailView, SummaryDraft, SummaryProfileView, UpdateDraftCommand, WidgetSessionView } from "@application/contracts";
 import type { WidgetBounds } from "./widget-layout";
 
@@ -16,6 +16,7 @@ export interface SynapseApi {
     search(query: SummarySearchCriteria): Promise<SummarySearchResult>;
     get(documentId: string): Promise<SummaryDetailView>;
     delete(documentId: string): Promise<void>;
+    copyReference(documentId: string, versionId: string): Promise<{ readonly uri: string; readonly text: string }>;
     retryNotes(documentId: string): Promise<void>;
   };
   profiles: {
@@ -36,6 +37,10 @@ export interface SynapseApi {
     trust(): Promise<HookInstallationStatus>;
     uninstall(): Promise<HookInstallationStatus>;
     dismissOnboarding(): Promise<HookInstallationStatus>;
+  };
+  plugin: {
+    inspect(): Promise<CodexPluginInstallationStatus>;
+    install(): Promise<CodexPluginInstallationStatus>;
   };
   export: {
     markdown(documentId: string): Promise<string | null>;

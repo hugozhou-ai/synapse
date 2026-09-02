@@ -14,7 +14,7 @@ describe("SummaryComposer destinations", () => {
       settings: { read: vi.fn().mockResolvedValue({ codexBinaryPath: null, summaryModel: "model", syncNotesByDefault: false, notesAccount: null, notesFolder: "Synapse", widgetVisible: true, widgetPositions: {}, widgetDisplayId: null, hookSetupAcknowledged: false }) },
       summaries: {
         search: vi.fn().mockResolvedValue({ total: 1, items: [{ documentId: "target", sessionId: "owner", title: "Existing title", abstract: "Existing abstract", tags: [], cwd: "/repo", profileId: "profile", versionKind: "final", notesLinked: true, updatedAt: "now" }] }),
-        get: vi.fn().mockResolvedValue({ id: "target", publicationStatus: "published", notesLinked: true, currentVersion: { id: "base", kind: "final", generationMode: "new", sourceSessionId: "owner", sourceTurnIds: ["old-turn"], baseVersionId: null, content: { title: "Existing title", abstract: "Existing abstract", bodyMarkdown: "# Existing\n\nKeep", tags: [] }, createdAt: "now" }, versions: [] }),
+        get: vi.fn().mockResolvedValue({ id: "target", reference: { uri: "synapse://summary/target?v=base", text: "[[Synapse:Existing title|synapse://summary/target?v=base]]" }, publicationStatus: "published", notesLinked: true, currentVersion: { id: "base", kind: "final", generationMode: "new", sourceSessionId: "owner", sourceTurnIds: ["old-turn"], baseVersionId: null, content: { title: "Existing title", abstract: "Existing abstract", bodyMarkdown: "# Existing\n\nKeep", tags: [] }, createdAt: "now" }, versions: [] }),
         generate,
       },
     } });

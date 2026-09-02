@@ -49,6 +49,7 @@ export class ElectronIpcController {
     });
     this.handle("summaries:search", searchSchema, (value) => this.container.summaryQueries.search(compactObject<SummarySearchCriteria>(value)));
     this.handle("summaries:get", idSchema, (id) => this.container.summaryQueries.getDocument(id));
+    this.handle("summaries:copy-reference", z.object({ documentId: idSchema, versionId: idSchema }).strict(), (value) => this.container.summaryReferences.copy(value.documentId, value.versionId));
     this.handle("summaries:delete", idSchema, async (id) => { await this.container.summaryDeletion.delete(id); this.windows.broadcastSessionsChanged(); });
     this.handle("summaries:retry-notes", idSchema, (id) => this.container.summaryPublication.retry(id));
     this.handle("profiles:list", z.unknown(), () => this.container.profiles.list());
@@ -64,6 +65,8 @@ export class ElectronIpcController {
     this.handle("hooks:trust", z.unknown(), () => this.container.hookManagement.trust());
     this.handle("hooks:uninstall", z.unknown(), () => this.container.hookManagement.uninstall());
     this.handle("hooks:dismiss-onboarding", z.unknown(), () => this.container.hookManagement.dismissOnboarding());
+    this.handle("plugin:inspect", z.unknown(), () => this.container.codexPlugin.inspect());
+    this.handle("plugin:install", z.unknown(), () => this.container.codexPlugin.install());
     this.handle("export:markdown", idSchema, (id) => this.container.exports.markdown(id));
     this.handle("export:json", idSchema, (id) => this.container.exports.json(id));
     this.handle("export:reveal-database", z.unknown(), () => this.container.exports.revealDatabaseDirectory());

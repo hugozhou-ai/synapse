@@ -97,6 +97,7 @@ export interface ConversationTurnsView {
 
 export interface SummaryDetailView {
   readonly id: string;
+  readonly reference: null | { readonly uri: string; readonly text: string };
   readonly publicationStatus: string;
   readonly notesLinked: boolean;
   readonly currentVersion: null | {

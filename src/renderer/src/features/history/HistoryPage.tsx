@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type DragEvent } from "react";
 import ReactMarkdown from "react-markdown";
-import { Database, FileDown, NotebookPen, RefreshCw, Search, Trash2 } from "lucide-react";
+import { Check, Copy, Database, FileDown, NotebookPen, RefreshCw, Search, Trash2 } from "lucide-react";
 import type { SummarySearchItem } from "@application/ports";
 import type { SummaryDetailView, SummaryProfileView } from "@application/contracts";
 import { DatePicker } from "../../components/DatePicker";
@@ -59,8 +59,9 @@ function HistoryDetail({ detail, onChanged, onDeleted, onError }: { detail: Summ
   const [editing, setEditing] = useState(false);
   const [content, setContent] = useState(current.content);
   const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  useEffect(() => { setContent(current.content); setEditing(false); setConfirmingDelete(false); }, [detail.id, current.id]);
+  useEffect(() => { setContent(current.content); setEditing(false); setCopied(false); setConfirmingDelete(false); }, [detail.id, current.id]);
   const act = async (operation: () => Promise<unknown>) => { setBusy(true); try { await operation(); onChanged(); } catch (reason) { onError(messageOf(reason)); } finally { setBusy(false); } };
   const regenerate = () => act(async () => {
     const settings = await window.synapse.settings.read();
@@ -68,6 +69,17 @@ function HistoryDetail({ detail, onChanged, onDeleted, onError }: { detail: Summ
   });
   const save = () => act(() => window.synapse.summaries.updateDraft({ documentId: detail.id, expectedVersionId: current.id, content }));
   const finalize = () => act(() => window.synapse.summaries.finalize({ documentId: detail.id, expectedVersionId: current.id, content }));
+  const copyReference = async () => {
+    setBusy(true);
+    try { await window.synapse.summaries.copyReference(detail.id, current.id); setCopied(true); }
+    catch (reason) { onError(messageOf(reason)); }
+    finally { setBusy(false); }
+  };
+  const dragReference = (event: DragEvent<HTMLButtonElement>) => {
+    if (!detail.reference) return;
+    event.dataTransfer.effectAllowed = "copy";
+    event.dataTransfer.setData("text/plain", detail.reference.text);
+  };
   const deleteSummary = async () => {
     if (!confirmingDelete) { setConfirmingDelete(true); return; }
     setBusy(true);
@@ -76,7 +88,7 @@ function HistoryDetail({ detail, onChanged, onDeleted, onError }: { detail: Summ
     finally { setBusy(false); }
   };
   return <>
-    <div className="detail-actions"><button disabled={busy} onClick={() => { setConfirmingDelete(false); setEditing((value) => !value); }}><NotebookPen size={14} />{editing ? "预览" : "编辑"}</button><button disabled={busy} onClick={() => { setConfirmingDelete(false); void regenerate(); }}><RefreshCw size={14} />重新生成</button><button disabled={busy} onClick={() => { setConfirmingDelete(false); void window.synapse.export.markdown(detail.id); }}><FileDown size={14} />MD</button><button disabled={busy} onClick={() => { setConfirmingDelete(false); void window.synapse.export.json(detail.id); }}><FileDown size={14} />JSON</button>{detail.publicationStatus === "failed" && <button disabled={busy} onClick={() => { setConfirmingDelete(false); void window.synapse.summaries.retryNotes(detail.id); }}><RefreshCw size={14} />重试 Notes</button>}<button className="delete-summary-action" disabled={busy} title={confirmingDelete ? "永久删除本地总结；不会删除已同步的 Apple Notes 内容" : "删除总结"} onClick={() => void deleteSummary()}><Trash2 size={14} />{confirmingDelete ? "确认删除" : "删除"}</button></div>
+    <div className="detail-actions"><button disabled={busy} draggable={Boolean(detail.reference)} title="点击复制；也可拖入 Codex 输入框" onDragStart={dragReference} onClick={() => { setConfirmingDelete(false); void copyReference(); }}>{copied ? <Check size={14} /> : <Copy size={14} />}{copied ? "已复制引用" : "引用"}</button><button disabled={busy} onClick={() => { setConfirmingDelete(false); setEditing((value) => !value); }}><NotebookPen size={14} />{editing ? "预览" : "编辑"}</button><button disabled={busy} onClick={() => { setConfirmingDelete(false); void regenerate(); }}><RefreshCw size={14} />重新生成</button><button disabled={busy} onClick={() => { setConfirmingDelete(false); void window.synapse.export.markdown(detail.id); }}><FileDown size={14} />MD</button><button disabled={busy} onClick={() => { setConfirmingDelete(false); void window.synapse.export.json(detail.id); }}><FileDown size={14} />JSON</button>{detail.publicationStatus === "failed" && <button disabled={busy} onClick={() => { setConfirmingDelete(false); void window.synapse.summaries.retryNotes(detail.id); }}><RefreshCw size={14} />重试 Notes</button>}<button className="delete-summary-action" disabled={busy} title={confirmingDelete ? "永久删除本地总结；不会删除已同步的 Apple Notes 内容" : "删除总结"} onClick={() => void deleteSummary()}><Trash2 size={14} />{confirmingDelete ? "确认删除" : "删除"}</button></div>
     {editing ? <div className="editor-form history-editor"><label>标题<input value={content.title} onChange={(event) => setContent({ ...content, title: event.target.value })} /></label><label>摘要<textarea rows={3} value={content.abstract} onChange={(event) => setContent({ ...content, abstract: event.target.value })} /></label><label>标签<input value={content.tags.join(", ")} onChange={(event) => setContent({ ...content, tags: event.target.value.split(",").map((value) => value.trim()).filter(Boolean) })} /></label><label>正文<textarea className="markdown-editor" value={content.bodyMarkdown} onChange={(event) => setContent({ ...content, bodyMarkdown: event.target.value })} /></label><div className="row-actions"><button className="secondary" disabled={busy} onClick={save}>保存新草稿</button><button className="primary" disabled={busy} onClick={finalize}>确认新 final</button></div></div> : <article className="markdown-preview"><span className="version-pill">{current.kind}</span><h1>{current.content.title}</h1><p className="abstract">{current.content.abstract}</p><div className="tag-row">{current.content.tags.map((tag) => <span key={tag}>{tag}</span>)}</div><ReactMarkdown>{current.content.bodyMarkdown}</ReactMarkdown></article>}
     <div className="version-history"><strong>版本历史</strong>{detail.versions.map((version) => <span key={version.id}>{version.kind} · {version.generationMode === "merge" ? "融合" : "新建"} · {new Date(version.createdAt).toLocaleString()}</span>)}</div>
   </>;

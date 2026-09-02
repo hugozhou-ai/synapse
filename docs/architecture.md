@@ -108,8 +108,10 @@ SQLite Markdown 是权威内容源，Apple Notes 仅是按固定 external id 更
 - `features/queue`：进行中与待总结任务队列。
 - `features/summary`：turn 选择、新建/融合目标选择、已有内容搜索预览与草稿编辑。
 - `features/history`：检索、版本历史、再生成与导出。
-- `features/settings`：App Server、Hook、Notes 和整理方案。
+- `features/settings`：App Server、Hook、Codex 引用插件、Notes 和整理方案；启动和状态检查均不安装插件。
 - `hooks`：会话队列订阅与总结草稿状态机。
 - `components`：无领域依赖的通用展示组件和 Notes 目标选择器。
 
 Renderer 与 preload 只使用 Application contracts/ViewModels，不直接引用领域实体。
+
+总结引用使用不可变的 document/version URI。Renderer 只把该短引用复制或拖入 prompt；随包插件不包含 skill 或 MCP server instructions，仅提供一个只读工具。工具对 SQLite 使用只读、`query_only` 连接，并要求 document/version 精确匹配；调用方可选择 metadata、abstract、outline、section 或受 `maxChars` 限制的 full，避免默认加载正文。插件安装由用户在设置页显式触发，并在保留个人 marketplace 现有内容的前提下通过 Codex CLI 完成。

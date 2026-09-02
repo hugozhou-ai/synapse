@@ -246,6 +246,25 @@ export interface ExportGateway {
   revealDatabaseDirectory(): Promise<void>;
 }
 
+export interface TextClipboardGateway {
+  writeText(value: string): void;
+}
+
+export interface CodexPluginInstallationStatus {
+  readonly installed: boolean;
+  readonly current: boolean;
+  readonly bundledVersion: string;
+  readonly installedVersion: string | null;
+  readonly pluginPath: string;
+  readonly marketplacePath: string;
+  readonly message: string | null;
+}
+
+export interface CodexPluginManagement {
+  inspect(): Promise<CodexPluginInstallationStatus>;
+  install(): Promise<CodexPluginInstallationStatus>;
+}
+
 export interface TurnSelectionValidator {
   create(availableTurns: readonly CodexTurn[], selectedTurnIds: readonly string[]): TurnSelection;
 }
