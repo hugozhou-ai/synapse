@@ -9,6 +9,7 @@ import type { SaveProfileCommand } from "@application/contracts";
 import { WIDGET_COLLAPSED_SIZE, WIDGET_EXPANDED_WIDTH, WIDGET_MAX_HEIGHT } from "@shared/widget-layout";
 
 const idSchema = z.string().min(1);
+const codexThreadIdSchema = z.string().uuid();
 const summaryContentSchema = z.object({ title: z.string().min(1), abstract: z.string(), bodyMarkdown: z.string(), tags: z.array(z.string()) });
 const searchSchema = z.object({ text: z.string().optional(), cwd: z.string().optional(), profileId: z.string().optional(), status: z.string().optional(), from: z.string().optional(), to: z.string().optional(), limit: z.number().int().min(1).max(200), offset: z.number().int().min(0) });
 const publicationTargetSchema = z.discriminatedUnion("kind", [
@@ -40,6 +41,7 @@ export class ElectronIpcController {
     this.handle("sessions:list", z.unknown(), () => this.container.sessionQueries.listWidgetQueue());
     this.handle("sessions:turns", idSchema, (id) => this.container.sessionQueries.getConversationTurns(id));
     this.handle("sessions:ignore", idSchema, async (id) => { await this.container.sessionAwareness.ignore(id); this.windows.broadcastSessionsChanged(); });
+    this.handle("sessions:open-in-codex", codexThreadIdSchema, (threadId) => this.container.codexSessions.open(threadId));
     this.handle("summaries:generate", generateSchema, async (value) => {
       const destination = value.destination.kind === "new"
         ? { ...value.destination, publicationTarget: value.destination.publicationTarget?.kind === "apple-notes"
@@ -57,6 +59,7 @@ export class ElectronIpcController {
     });
     this.handle("summaries:search", searchSchema, (value) => this.container.summaryQueries.search(compactObject<SummarySearchCriteria>(value)));
     this.handle("summaries:get", idSchema, (id) => this.container.summaryQueries.getDocument(id));
+    this.handle("summaries:source", z.object({ documentId: idSchema, versionId: idSchema }).strict(), (value) => this.container.summaryQueries.getVersionSource(value.documentId, value.versionId));
     this.handle("summaries:copy-reference", z.object({ documentId: idSchema, versionId: idSchema }).strict(), (value) => this.container.summaryReferences.copy(value.documentId, value.versionId));
     this.handle("summaries:delete", idSchema, async (id) => { await this.container.summaryDeletion.delete(id); this.windows.broadcastSessionsChanged(); });
     this.handle("summaries:retry-publication", idSchema, (id) => this.container.summaryPublication.retry(id));

@@ -60,6 +60,8 @@ export interface FinalizedSummaryView {
   readonly sequence: number;
   readonly kind: string;
   readonly generationMode: "new" | "merge";
+  readonly operation: SummaryVersionOperationView;
+  readonly parentVersionId: string | null;
   readonly baseVersionId: string | null;
   readonly content: SummaryContentView;
   readonly sourceRevision: { readonly sessionId: string; readonly turnIds: readonly string[]; readonly contentHash: string };
@@ -108,6 +110,46 @@ export interface ConversationTurnsView {
   readonly turns: readonly TurnSelectionView[];
 }
 
+export type SummaryVersionOperationView = "generate" | "merge" | "regenerate" | "manual-edit" | "finalize";
+
+export interface SummaryVersionView {
+  readonly id: string;
+  readonly sequence: number;
+  readonly kind: string;
+  readonly generationMode: "new" | "merge";
+  readonly operation: SummaryVersionOperationView;
+  readonly parentVersionId: string | null;
+  readonly baseVersionId: string | null;
+  readonly sourceSessionId: string;
+  readonly sourceTurnIds: readonly string[];
+  readonly sourceHash: string;
+  readonly model: string | null;
+  readonly content: SummaryContentView;
+  readonly createdAt: string;
+}
+
+export interface SummaryVersionSourceView {
+  readonly available: boolean;
+  readonly session: null | {
+    readonly sessionId: string;
+    readonly threadId: string;
+    readonly title: string | null;
+    readonly cwd: string;
+    readonly model: string | null;
+    readonly status: string;
+  };
+  readonly turns: readonly {
+    readonly id: string;
+    readonly sequence: number;
+    readonly status: string;
+    readonly promptContent: string;
+    readonly assistantContent: string;
+    readonly startedAt: string;
+    readonly completedAt: string | null;
+  }[];
+  readonly missingTurnIds: readonly string[];
+}
+
 export interface SummaryDetailView {
   readonly id: string;
   readonly reference: null | { readonly uri: string; readonly text: string };
@@ -115,25 +157,8 @@ export interface SummaryDetailView {
   readonly notesLinked: boolean;
   readonly notionLinked: boolean;
   readonly publisher: "apple-notes" | "notion" | null;
-  readonly currentVersion: null | {
-    readonly id: string;
-    readonly kind: string;
-    readonly generationMode: "new" | "merge";
-    readonly sourceSessionId: string;
-    readonly sourceTurnIds: readonly string[];
-    readonly baseVersionId: string | null;
-    readonly content: SummaryContentView;
-    readonly createdAt: string;
-  };
-  readonly versions: readonly {
-    id: string;
-    kind: string;
-    generationMode: "new" | "merge";
-    sourceSessionId: string;
-    sourceTurnIds: readonly string[];
-    baseVersionId: string | null;
-    createdAt: string;
-  }[];
+  readonly currentVersion: SummaryVersionView | null;
+  readonly versions: readonly SummaryVersionView[];
 }
 
 export interface SummaryProfileView {

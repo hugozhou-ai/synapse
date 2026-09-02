@@ -1,5 +1,5 @@
 import type { AgentModel, ApplicationSettings, ApplicationSettingsUpdate, AppServerRuntimeStatus, CodexPluginInstallationStatus, HookInstallationStatus, SummarySearchCriteria, SummarySearchResult } from "@application/ports";
-import type { ConversationTurnsView, FinalizeSummaryCommand, FinalizedSummaryView, GenerateSummaryCommand, NotesTargetsView, NotionConnectionView, RegenerateSummaryCommand, RendererErrorReport, SaveProfileCommand, SummaryDetailView, SummaryDraft, SummaryProfileView, UpdateDraftCommand, WidgetSessionView } from "@application/contracts";
+import type { ConversationTurnsView, FinalizeSummaryCommand, FinalizedSummaryView, GenerateSummaryCommand, NotesTargetsView, NotionConnectionView, RegenerateSummaryCommand, RendererErrorReport, SaveProfileCommand, SummaryDetailView, SummaryDraft, SummaryProfileView, SummaryVersionSourceView, UpdateDraftCommand, WidgetSessionView } from "@application/contracts";
 import type { WidgetBounds } from "./widget-layout";
 
 export interface SynapseApi {
@@ -7,6 +7,7 @@ export interface SynapseApi {
     listWidgetQueue(): Promise<readonly WidgetSessionView[]>;
     turns(sessionId: string): Promise<ConversationTurnsView>;
     ignore(sessionId: string): Promise<void>;
+    openInCodex(threadId: string): Promise<void>;
   };
   summaries: {
     generate(command: GenerateSummaryCommand): Promise<SummaryDraft>;
@@ -15,6 +16,7 @@ export interface SynapseApi {
     finalize(command: FinalizeSummaryCommand): Promise<FinalizedSummaryView>;
     search(query: SummarySearchCriteria): Promise<SummarySearchResult>;
     get(documentId: string): Promise<SummaryDetailView>;
+    source(documentId: string, versionId: string): Promise<SummaryVersionSourceView>;
     copyReference(documentId: string, versionId: string): Promise<{ readonly uri: string; readonly text: string }>;
     delete(documentId: string): Promise<void>;
     retryPublication(documentId: string): Promise<void>;

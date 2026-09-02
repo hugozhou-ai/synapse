@@ -1,5 +1,5 @@
 import { CodexSessionAggregate, CodexTurn, type CodexLifecycleEvent, type CodexSessionProps, type SessionStatus, type TurnStatus } from "@domain/session";
-import { AppleNotesPublicationTarget, NotionPublicationTarget, SourceRevision, SummaryDocumentAggregate, SummaryProfile, SummaryVersion, TurnSelection, type PublicationStatus, type PublicationTarget, type PublisherKind, type SummaryProfileKind, type SummaryVersionKind } from "@domain/summary";
+import { AppleNotesPublicationTarget, NotionPublicationTarget, SourceRevision, SummaryDocumentAggregate, SummaryProfile, SummaryVersion, TurnSelection, type PublicationStatus, type PublicationTarget, type PublisherKind, type SummaryProfileKind, type SummaryVersionKind, type SummaryVersionOperation } from "@domain/summary";
 import type {
   ApplicationSettings, CodexSessionRepository, CodexTurnRepository, HookEventRepository, OutboxMessage, OutboxRepository,
   PublicationRecord, PublicationRepository, SettingsRepository, SummaryDocumentRepository, SummaryJob, SummaryJobRepository,
@@ -237,14 +237,14 @@ export class SqliteSummaryDocumentRepository implements SummaryDocumentRepositor
 
   private insertVersions(document: SummaryDocumentAggregate): void {
     const insertVersion = this.db.connection.prepare(`
-    INSERT OR IGNORE INTO summary_versions(id,document_id,sequence,kind,title,abstract,body_markdown,tags_json,source_turn_ids_json,source_hash,model,output_json,created_at,source_session_id,generation_mode,base_version_id)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    INSERT OR IGNORE INTO summary_versions(id,document_id,sequence,kind,title,abstract,body_markdown,tags_json,source_turn_ids_json,source_hash,model,output_json,created_at,source_session_id,generation_mode,base_version_id,parent_version_id,operation)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `);
     for (const version of document.snapshot.versions) {
       const v = version.props;
       insertVersion.run(v.id, v.documentId, v.sequence, v.kind, v.content.title, v.content.abstract, v.content.bodyMarkdown,
         JSON.stringify(v.content.tags), JSON.stringify(v.sourceRevision.turnIds), v.sourceRevision.contentHash, v.model, JSON.stringify(v.content), v.createdAt,
-        v.sourceRevision.sessionId, v.generationMode, v.baseVersionId);
+        v.sourceRevision.sessionId, v.generationMode, v.baseVersionId, v.parentVersionId, v.operation);
     }
   }
 
@@ -265,6 +265,8 @@ function mapVersion(row: Row): SummaryVersion {
   return new SummaryVersion({
     id: String(row.id), documentId: String(row.document_id), sequence: Number(row.sequence), kind: String(row.kind) as SummaryVersionKind,
     generationMode: String(row.generation_mode) as SummaryVersion["props"]["generationMode"],
+    operation: String(row.operation) as SummaryVersionOperation,
+    parentVersionId: row.parent_version_id === null ? null : String(row.parent_version_id),
     baseVersionId: row.base_version_id === null ? null : String(row.base_version_id),
     content: { title: String(row.title), abstract: String(row.abstract), bodyMarkdown: String(row.body_markdown), tags: parseJson<string[]>(row.tags_json) },
     sourceRevision: new SourceRevision(String(row.source_session_id), parseJson<string[]>(row.source_turn_ids_json), String(row.source_hash)),

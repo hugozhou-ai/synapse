@@ -13,11 +13,12 @@ async function invoke<T>(channel: string, input?: unknown): Promise<T> {
 const api: SynapseApi = {
   sessions: {
     listWidgetQueue: () => invoke("sessions:list"), turns: (id) => invoke("sessions:turns", id), ignore: (id) => invoke("sessions:ignore", id),
+    openInCodex: (threadId) => invoke("sessions:open-in-codex", threadId),
   },
   summaries: {
     generate: (command) => invoke("summaries:generate", command), regenerate: (command) => invoke("summaries:regenerate", command), updateDraft: (command) => invoke("summaries:update", command),
     finalize: (command) => invoke("summaries:finalize", command), search: (query) => invoke("summaries:search", query),
-    get: (id) => invoke("summaries:get", id), copyReference: (documentId, versionId) => invoke("summaries:copy-reference", { documentId, versionId }), delete: (id) => invoke("summaries:delete", id), retryPublication: (id) => invoke("summaries:retry-publication", id),
+    get: (id) => invoke("summaries:get", id), source: (documentId, versionId) => invoke("summaries:source", { documentId, versionId }), copyReference: (documentId, versionId) => invoke("summaries:copy-reference", { documentId, versionId }), delete: (id) => invoke("summaries:delete", id), retryPublication: (id) => invoke("summaries:retry-publication", id),
   },
   profiles: { list: () => invoke("profiles:list"), save: (command) => invoke("profiles:save", command), delete: (id) => invoke("profiles:delete", id) },
   settings: { read: () => invoke("settings:read"), update: (command) => invoke("settings:update", command), models: () => invoke("settings:models"), notesTargets: () => invoke("settings:notes-targets"), notionConnection: () => invoke("settings:notion-connection"), runtime: () => invoke("settings:runtime") },

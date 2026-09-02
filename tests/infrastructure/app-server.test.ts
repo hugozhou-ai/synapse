@@ -203,7 +203,7 @@ describe("App Server adapters", () => {
       return {};
     });
     const publisher = new CodexAppServerNotionPublisher(client, "/tmp/synapse-notion", logger);
-    const version = new SummaryVersion({ id: "version", documentId: "doc", sequence: 0, kind: "final", generationMode: "new", baseVersionId: null, content: { title: "Title", abstract: "", bodyMarkdown: "## Body", tags: [] }, sourceRevision: new SourceRevision("session", ["turn"], "hash"), model: null, createdAt: "now" });
+    const version = new SummaryVersion({ id: "version", documentId: "doc", sequence: 0, kind: "final", generationMode: "new", operation: "finalize", parentVersionId: null, baseVersionId: null, content: { title: "Title", abstract: "", bodyMarkdown: "## Body", tags: [] }, sourceRevision: new SourceRevision("session", ["turn"], "hash"), model: null, createdAt: "now" });
     await expect(publisher.publish({ documentId: "doc", version, target: new NotionPublicationTarget("https://www.notion.so/Parent-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"), existingExternalId: null }))
       .resolves.toEqual({ externalId: "123456781234123412341234567890ab", updated: false });
     expect(requests.find((item) => item.method === "mcpServer/tool/call")?.params).toEqual({
@@ -221,7 +221,7 @@ describe("App Server adapters", () => {
       return {};
     });
     const publisher = new CodexAppServerNotionPublisher(client, "/tmp/synapse-notion", logger);
-    const version = new SummaryVersion({ id: "version", documentId: "doc", sequence: 1, kind: "final", generationMode: "merge", baseVersionId: "base", content: { title: "Updated", abstract: "", bodyMarkdown: "New body", tags: [] }, sourceRevision: new SourceRevision("session", ["turn"], "hash"), model: null, createdAt: "now" });
+    const version = new SummaryVersion({ id: "version", documentId: "doc", sequence: 1, kind: "final", generationMode: "merge", operation: "finalize", parentVersionId: "base", baseVersionId: "base", content: { title: "Updated", abstract: "", bodyMarkdown: "New body", tags: [] }, sourceRevision: new SourceRevision("session", ["turn"], "hash"), model: null, createdAt: "now" });
     await expect(publisher.publish({ documentId: "doc", version, target: new NotionPublicationTarget("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"), existingExternalId: "page-id" }))
       .resolves.toEqual({ externalId: "page-id", updated: true });
     expect(calls).toHaveLength(2);

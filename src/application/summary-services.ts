@@ -89,7 +89,7 @@ export class DestinationAwareSummaryGenerationService implements SummaryGenerati
       });
       input = {
         documentId: document.id, sourceSessionId: session.id, expectedVersionId: null, versionBaseVersionId: null,
-        generationMode: "new", profile, context, jobId, model: command.model,
+        generationMode: "new", operation: "generate", profile, context, jobId, model: command.model,
       };
     } else {
       input = await this.unitOfWork.execute(async () => {
@@ -100,7 +100,7 @@ export class DestinationAwareSummaryGenerationService implements SummaryGenerati
         await this.jobs.save(runningJob(jobId, document.id, session.id, "merge", target.props.id, context, now));
         return {
           documentId: document.id, sourceSessionId: session.id, expectedVersionId: target.props.id, versionBaseVersionId: target.props.id,
-          generationMode: "merge" as const, target: { versionId: target.props.id, content: target.props.content }, context, jobId, model: command.model,
+          generationMode: "merge" as const, operation: "merge" as const, target: { versionId: target.props.id, content: target.props.content }, context, jobId, model: command.model,
         };
       });
     }
@@ -123,14 +123,14 @@ export class DestinationAwareSummaryGenerationService implements SummaryGenerati
       if (!profile) throw new DomainError("PROFILE_NOT_FOUND", "Summary profile does not exist.");
       input = {
         documentId: document.id, sourceSessionId: session.id, expectedVersionId: current.props.id, versionBaseVersionId: null,
-        generationMode: "new", profile, context, jobId, model: command.model,
+        generationMode: "new", operation: "regenerate", profile, context, jobId, model: command.model,
       };
     } else {
       const base = current.props.baseVersionId ? document.version(current.props.baseVersionId) : null;
       if (!base) throw new DomainError("SUMMARY_BASE_VERSION_NOT_FOUND", "融合所依据的原版本不存在，无法重新生成。");
       input = {
         documentId: document.id, sourceSessionId: session.id, expectedVersionId: current.props.id, versionBaseVersionId: base.props.id,
-        generationMode: "merge", target: { versionId: base.props.id, content: base.props.content }, context, jobId, model: command.model,
+        generationMode: "merge", operation: "regenerate", target: { versionId: base.props.id, content: base.props.content }, context, jobId, model: command.model,
       };
     }
     await this.unitOfWork.execute(async () => {
@@ -163,7 +163,8 @@ export class DestinationAwareSummaryGenerationService implements SummaryGenerati
         if (!document || document.snapshot.currentVersionId !== input.expectedVersionId) throw targetChangedError();
         const next = new SummaryVersion({
           id: this.ids.next(), documentId: document.id, sequence: document.snapshot.versions.length,
-          kind: "agent-draft", generationMode: input.generationMode, baseVersionId: input.versionBaseVersionId,
+          kind: "agent-draft", generationMode: input.generationMode, operation: input.operation,
+          parentVersionId: input.expectedVersionId, baseVersionId: input.versionBaseVersionId,
           content: { title: generated.title, abstract: generated.abstract, bodyMarkdown: generated.bodyMarkdown, tags: generated.tags },
           sourceRevision: new SourceRevision(input.sourceSessionId, input.context.sourceTurnIds, input.context.sourceHash),
           model: generated.model, createdAt: now,
@@ -199,6 +200,7 @@ type AgentRunInput = {
   readonly sourceSessionId: string;
   readonly expectedVersionId: string | null;
   readonly versionBaseVersionId: string | null;
+  readonly operation: "generate" | "merge" | "regenerate";
   readonly context: SummaryContext;
   readonly jobId: string;
   readonly model: string | null;
@@ -270,7 +272,8 @@ export class VersionedSummaryFinalizationService implements SummaryFinalizationS
       if (source.props.id !== command.expectedVersionId) throw targetChangedError();
       const version = new SummaryVersion({
         ...source.props, id: this.ids.next(), sequence: document.snapshot.versions.length,
-        kind: "edited-draft", content: command.content, createdAt: this.clock.now(),
+        kind: "edited-draft", operation: "manual-edit", parentVersionId: source.props.id,
+        content: command.content, createdAt: this.clock.now(),
       });
       document.addDraft(version);
       await this.summaries.save(document);
@@ -293,7 +296,8 @@ export class VersionedSummaryFinalizationService implements SummaryFinalizationS
       const now = this.clock.now();
       const version = new SummaryVersion({
         ...source.props, id: this.ids.next(), sequence: document.snapshot.versions.length,
-        kind: "final", content: command.content, createdAt: now,
+        kind: "final", operation: "finalize", parentVersionId: source.props.id,
+        content: command.content, createdAt: now,
       });
       document.finalize(version, shouldPublish);
       await this.summaries.save(document);

@@ -34,7 +34,7 @@ describe("SQLite repository contract", () => {
     try {
       const row = database.connection.prepare("SELECT prompt_content, assistant_content FROM codex_turns").get() as { prompt_content: string; assistant_content: string };
       expect(row).toEqual({ prompt_content: "prompt", assistant_content: "assistant" });
-      expect((database.connection.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(5);
+      expect((database.connection.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(6);
     } finally { database.close(); }
   });
 
@@ -70,7 +70,8 @@ describe("SQLite repository contract", () => {
       );
       INSERT INTO codex_sessions VALUES ('source');
       INSERT INTO summary_documents VALUES ('doc', 'source', NULL, 'Synapse', 'published');
-      INSERT INTO summary_versions VALUES ('version', 'doc', 0, 'final', 'T', '', 'B', '[]', '["turn"]', 'hash', NULL, '{}', 'now');
+      INSERT INTO summary_versions VALUES ('draft', 'doc', 0, 'agent-draft', 'T', '', 'Draft', '[]', '["turn"]', 'hash', NULL, '{}', 'before');
+      INSERT INTO summary_versions VALUES ('version', 'doc', 1, 'final', 'T', '', 'B', '[]', '["turn"]', 'hash', NULL, '{}', 'now');
       INSERT INTO summary_jobs VALUES ('job', 'doc', 'succeeded', NULL, '["turn"]', 'now', 'now', '[]');
       INSERT INTO notes_exports VALUES ('doc', 'apple-notes', 'note-1', NULL, 'Synapse', 'version', 'published', NULL, 'now');
       INSERT INTO outbox VALUES ('message', 'notes-sync', 'doc', '{}', 'now', NULL, 0, NULL);
@@ -80,15 +81,16 @@ describe("SQLite repository contract", () => {
     legacy.close();
     const database = new NodeSqliteSynapseDatabase(path, logger);
     try {
-      const version = database.connection.prepare("SELECT source_session_id,generation_mode,base_version_id FROM summary_versions").get() as { source_session_id: string; generation_mode: string; base_version_id: string | null };
+      const version = database.connection.prepare("SELECT source_session_id,generation_mode,base_version_id,parent_version_id,operation FROM summary_versions WHERE id = 'version'").get() as { source_session_id: string; generation_mode: string; base_version_id: string | null; parent_version_id: string | null; operation: string };
       const job = database.connection.prepare("SELECT source_session_id,generation_mode,base_version_id FROM summary_jobs").get() as { source_session_id: string; generation_mode: string; base_version_id: string | null };
-      expect(version).toEqual({ source_session_id: "source", generation_mode: "new", base_version_id: null });
+      expect(version).toEqual({ source_session_id: "source", generation_mode: "new", base_version_id: null, parent_version_id: "draft", operation: "finalize" });
+      expect(database.connection.prepare("SELECT parent_version_id,operation FROM summary_versions WHERE id = 'draft'").get()).toEqual({ parent_version_id: null, operation: "generate" });
       expect(job).toEqual({ source_session_id: "source", generation_mode: "new", base_version_id: null });
       expect(database.connection.prepare("SELECT publisher,external_id,target_json FROM publications").get()).toEqual({
         publisher: "apple-notes", external_id: "note-1", target_json: JSON.stringify({ kind: "apple-notes", account: null, folder: "Synapse" }),
       });
       expect(database.connection.prepare("SELECT kind FROM outbox").get()).toEqual({ kind: "publication-sync" });
-      expect((database.connection.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(5);
+      expect((database.connection.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(6);
     } finally { database.close(); }
   });
 
@@ -107,13 +109,15 @@ describe("SQLite repository contract", () => {
 
       const document = SummaryDocumentAggregate.create({ id: "doc", sessionId: "session", profileId: "builtin-task-retrospective", selection: new TurnSelection(["turn"]), publicationTarget: null, createdAt: "2026-01-01T00:00:03.000Z", updatedAt: "2026-01-01T00:00:03.000Z" });
       const revision = new SourceRevision("session", ["turn"], "hash");
-      document.addDraft(new SummaryVersion({ id: "draft", documentId: "doc", sequence: 0, kind: "agent-draft", generationMode: "new", baseVersionId: null, content: { title: "Search implementation", abstract: "SQLite FTS", bodyMarkdown: "Implemented a searchable archive.", tags: ["search"] }, sourceRevision: revision, model: "model", createdAt: "2026-01-01T00:00:04.000Z" }));
+      document.addDraft(new SummaryVersion({ id: "draft", documentId: "doc", sequence: 0, kind: "agent-draft", generationMode: "new", operation: "generate", parentVersionId: null, baseVersionId: null, content: { title: "Search implementation", abstract: "SQLite FTS", bodyMarkdown: "Implemented a searchable archive.", tags: ["search"] }, sourceRevision: revision, model: "model", createdAt: "2026-01-01T00:00:04.000Z" }));
       await summaries.create(document);
-      document.finalize(new SummaryVersion({ id: "final", documentId: "doc", sequence: 1, kind: "final", generationMode: "new", baseVersionId: null, content: { title: "Search implementation", abstract: "SQLite FTS", bodyMarkdown: "Implemented a searchable archive.", tags: ["search"] }, sourceRevision: revision, model: "model", createdAt: "2026-01-01T00:00:05.000Z" }), false);
+      document.finalize(new SummaryVersion({ id: "final", documentId: "doc", sequence: 1, kind: "final", generationMode: "new", operation: "finalize", parentVersionId: "draft", baseVersionId: null, content: { title: "Search implementation", abstract: "SQLite FTS", bodyMarkdown: "Implemented a searchable archive.", tags: ["search"] }, sourceRevision: revision, model: "model", createdAt: "2026-01-01T00:00:05.000Z" }), false);
       await summaries.save(document);
       database.connection.prepare("INSERT INTO publications(document_id,publisher,external_id,target_json,version_id,status,error,updated_at) VALUES (?,?,?,?,?,?,?,?)")
         .run("doc", "apple-notes", "note-1", JSON.stringify({ kind: "apple-notes", account: null, folder: "Synapse" }), "final", "published", null, "2026-01-01T00:00:06.000Z");
-      expect((await summaries.findById("doc"))?.snapshot.versions).toHaveLength(2);
+      const restored = await summaries.findById("doc");
+      expect(restored?.snapshot.versions).toHaveLength(2);
+      expect(restored?.currentVersion?.props).toMatchObject({ operation: "finalize", parentVersionId: "draft" });
       const result = await summaries.search({ text: "searchable", limit: 20, offset: 0 });
       expect(result.total).toBe(1); expect(result.items[0]).toMatchObject({ documentId: "doc", notesLinked: true });
     } finally { database.close(); }

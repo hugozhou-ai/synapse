@@ -1,6 +1,6 @@
-import { SummaryProfile } from "@domain/summary";
+import { SummaryProfile, type SummaryVersion } from "@domain/summary";
 import type { AgentModel, ApplicationSettings, ApplicationSettingsUpdate, AppServerRuntimeStatus, AppServerRuntimeStatusProvider, Clock, CodexSessionRepository, ExportGateway, IdGenerator, NotesTargetGateway, NotionConnectionGateway, PublicationRepository, SettingsRepository, SummaryAgentGateway, SummaryDocumentRepository, SummaryJobRepository, SummaryProfileRepository, SummarySearchCriteria, SummarySearchResult, UnitOfWork } from "./ports";
-import type { ConversationTurnsView, NotesTargetsView, NotionConnectionView, SaveProfileCommand, SummaryDetailView, SummaryProfileView, WidgetSessionView } from "./contracts";
+import type { ConversationTurnsView, NotesTargetsView, NotionConnectionView, SaveProfileCommand, SummaryDetailView, SummaryProfileView, SummaryVersionSourceView, SummaryVersionView, WidgetSessionView } from "./contracts";
 import { DomainError } from "@domain/shared";
 import { formatSummaryReference } from "./summary-reference";
 
@@ -61,10 +61,15 @@ function preview(value: string): string { return value.replaceAll(/\s+/g, " ").t
 export interface SummaryQueryService {
   search(query: SummarySearchCriteria): Promise<SummarySearchResult>;
   getDocument(documentId: string): Promise<SummaryDetailView>;
+  getVersionSource(documentId: string, versionId: string): Promise<SummaryVersionSourceView>;
 }
 
 export class RepositorySummaryQueryService implements SummaryQueryService {
-  constructor(private readonly summaries: SummaryDocumentRepository, private readonly publications: PublicationRepository) {}
+  constructor(
+    private readonly summaries: SummaryDocumentRepository,
+    private readonly publications: PublicationRepository,
+    private readonly sessions: CodexSessionRepository,
+  ) {}
   search(query: SummarySearchCriteria): Promise<SummarySearchResult> { return this.summaries.search(query); }
 
   async getDocument(documentId: string): Promise<SummaryDetailView> {
@@ -79,18 +84,45 @@ export class RepositorySummaryQueryService implements SummaryQueryService {
       notesLinked: publication?.publisher === "apple-notes" && Boolean(publication.externalId),
       notionLinked: publication?.publisher === "notion" && Boolean(publication.externalId),
       publisher: publication?.publisher ?? null,
-      currentVersion: current ? {
-        id: current.props.id, kind: current.props.kind, generationMode: current.props.generationMode,
-        sourceSessionId: current.props.sourceRevision.sessionId, sourceTurnIds: current.props.sourceRevision.turnIds,
-        baseVersionId: current.props.baseVersionId, content: current.props.content, createdAt: current.props.createdAt,
-      } : null,
-      versions: document.snapshot.versions.map((version) => ({
-        id: version.props.id, kind: version.props.kind, generationMode: version.props.generationMode,
-        sourceSessionId: version.props.sourceRevision.sessionId, sourceTurnIds: version.props.sourceRevision.turnIds,
-        baseVersionId: version.props.baseVersionId, createdAt: version.props.createdAt,
-      })),
+      currentVersion: current ? toVersionView(current) : null,
+      versions: document.snapshot.versions.map(toVersionView),
     };
   }
+
+  async getVersionSource(documentId: string, versionId: string): Promise<SummaryVersionSourceView> {
+    const document = await this.summaries.findById(documentId);
+    if (!document) throw new DomainError("SUMMARY_NOT_FOUND", "Summary document does not exist.");
+    const version = document.version(versionId);
+    if (!version) throw new DomainError("SUMMARY_VERSION_NOT_FOUND", "Summary version does not belong to this document.");
+    const session = await this.sessions.findById(version.props.sourceRevision.sessionId);
+    if (!session) return { available: false, session: null, turns: [], missingTurnIds: version.props.sourceRevision.turnIds };
+    const selected = new Set(version.props.sourceRevision.turnIds);
+    const turns = session.turns.filter((turn) => selected.has(turn.id)).map((turn) => ({
+      id: turn.id, sequence: turn.sequence, status: turn.status,
+      promptContent: turn.props.promptContent, assistantContent: turn.props.assistantContent,
+      startedAt: turn.props.startedAt, completedAt: turn.props.completedAt,
+    }));
+    const found = new Set(turns.map((turn) => turn.id));
+    const missingTurnIds = version.props.sourceRevision.turnIds.filter((id) => !found.has(id));
+    return {
+      available: missingTurnIds.length === 0,
+      session: {
+        sessionId: session.id, threadId: session.threadId, title: session.snapshot.title,
+        cwd: session.snapshot.cwd, model: session.snapshot.model, status: session.status,
+      },
+      turns, missingTurnIds,
+    };
+  }
+}
+
+function toVersionView(version: SummaryVersion): SummaryVersionView {
+  const props = version.props;
+  return {
+    id: props.id, sequence: props.sequence, kind: props.kind, generationMode: props.generationMode,
+    operation: props.operation, parentVersionId: props.parentVersionId, baseVersionId: props.baseVersionId,
+    sourceSessionId: props.sourceRevision.sessionId, sourceTurnIds: props.sourceRevision.turnIds,
+    sourceHash: props.sourceRevision.contentHash, model: props.model, content: props.content, createdAt: props.createdAt,
+  };
 }
 
 export interface ProfileApplicationService {

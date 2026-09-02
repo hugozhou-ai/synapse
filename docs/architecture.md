@@ -100,7 +100,7 @@ Renderer 顶层由 `RendererErrorBoundary` 隔离渲染异常，并通过类型�
 
 超长会话按 turn 边界分块。每个 chunk 先生成事实摘要，再执行最终合成；`summary_jobs.stage_coverage_json` 保存每阶段覆盖的 turn IDs，不静默丢弃来源。
 
-每个总结版本保存 `source_session_id`、`generation_mode` 和可选 `base_version_id`。因此一份总结可以累计来自多个 Codex session 的事实，同时保留逐版本来源。融合任务同时按 source session 和目标 document 排他；agent 返回后必须确认 `currentVersionId` 仍等于开始时的基础版本，否则以 `SUMMARY_TARGET_CHANGED` 失败，不追加兜底内容。
+每个总结版本保存 `source_session_id`、`generation_mode`、`operation`、直接 `parent_version_id` 和可选融合 `base_version_id`。因此一份总结可以累计来自多个 Codex session 的事实，并区分 Agent 新建/融合/重新生成、人工编辑和 final 确认；历史页以父链计算任意版本 Diff，并按版本懒加载关联 turn 原文。融合任务同时按 source session 和目标 document 排他；agent 返回后必须确认 `currentVersionId` 仍等于开始时的基础版本，否则以 `SUMMARY_TARGET_CHANGED` 失败，不追加兜底内容。
 
 SQLite Markdown 是权威内容源，Apple Notes 和 Notion 仅是按固定 external id 更新的单向发布副本。Notion publisher 为每次调用创建 ephemeral App Server thread，读取 `codex_apps` 的工具清单后直接调用 `notion.notion-create-pages` 或 `notion.notion-update-page`；凭据完全由 Codex 的 App 连接管理。
 

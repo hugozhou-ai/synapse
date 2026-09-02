@@ -9,6 +9,7 @@ import { ArbitraryTurnSelectionService, DefaultSessionLifecycleService, Normaliz
 import { appServerAgentRuntimeDirectory, LazyCodexAppServerRuntime } from "@infrastructure/app-server/runtime";
 import { ElectronExportGateway } from "@infrastructure/electron/export-gateway";
 import { ElectronTextClipboardGateway } from "@infrastructure/electron/clipboard-gateway";
+import { ElectronCodexSessionNavigator } from "@infrastructure/electron/codex-session-navigator";
 import { JsonCodexHookConfigStore } from "@infrastructure/hooks/config-store";
 import { CodexHookProtocolMapper } from "@infrastructure/hooks/mapper";
 import { UnixSocketHookEventReceiver, type HookEventReceiver } from "@infrastructure/hooks/receiver";
@@ -25,7 +26,7 @@ import { NodeContentHashService, SystemClock, UuidGenerator } from "@infrastruct
 import { CompositeLogger, JsonConsoleLogger, type Logger } from "@shared/logger";
 import { RepositorySummaryReferenceService, type SummaryReferenceService } from "@application/summary-reference";
 import { FileSystemCodexPluginManagement } from "@infrastructure/plugins/codex-plugin-management";
-import type { CodexPluginManagement } from "@application/ports";
+import type { CodexPluginManagement, CodexSessionNavigator } from "@application/ports";
 
 export class ElectronApplicationContainer {
   readonly sessionAwareness!: SessionAwarenessService;
@@ -41,6 +42,7 @@ export class ElectronApplicationContainer {
   readonly exports!: ExportApplicationService;
   readonly summaryReferences!: SummaryReferenceService;
   readonly codexPlugin!: CodexPluginManagement;
+  readonly codexSessions!: CodexSessionNavigator;
   readonly hookReceiver!: HookEventReceiver;
   readonly publicationWorker!: PublicationOutboxWorker;
   readonly logger!: Logger;
@@ -100,7 +102,7 @@ export class ElectronApplicationContainer {
     const services = {
       sessionAwareness: awareness,
       sessionQueries: new RepositorySessionQueryService(sessions, clock, summaries, jobs),
-      summaryQueries: new RepositorySummaryQueryService(summaries, publications),
+      summaryQueries: new RepositorySummaryQueryService(summaries, publications, sessions),
       summaryGeneration,
       summaryDeletion: new TransactionalSummaryDeletionService(summaries, sessions, outbox, unitOfWork),
       summaryFinalization: finalization,
@@ -111,6 +113,7 @@ export class ElectronApplicationContainer {
       exports: new SystemExportApplicationService(summaries, new ElectronExportGateway(databasePath)),
       summaryReferences: new RepositorySummaryReferenceService(summaries, new ElectronTextClipboardGateway()),
       codexPlugin: new FileSystemCodexPluginManagement(resourcePath(app, "plugins/synapse-reference"), homedir(), settingsValue.codexBinaryPath, logger),
+      codexSessions: new ElectronCodexSessionNavigator(),
       hookReceiver: receiver,
       publicationWorker,
       logger,

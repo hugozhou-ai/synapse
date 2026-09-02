@@ -10,7 +10,7 @@ describe("AppleNotesSummaryPublisher", () => {
     let captured = "";
     const executor: AppleScriptExecutor = { async execute(_path, payload) { captured = payload; return JSON.stringify({ externalId: "note-1", updated: true }); } };
     const publisher = new AppleNotesSummaryPublisher("/fixed/script.jxa", logger, executor);
-    const version = new SummaryVersion({ id: "v", documentId: "doc", sequence: 1, kind: "final", generationMode: "new", baseVersionId: null, content: { title: "Title", abstract: "", bodyMarkdown: "# Title\n\nBody", tags: [] }, sourceRevision: new SourceRevision("session", ["turn"], "hash"), model: null, createdAt: "now" });
+    const version = new SummaryVersion({ id: "v", documentId: "doc", sequence: 1, kind: "final", generationMode: "new", operation: "finalize", parentVersionId: null, baseVersionId: null, content: { title: "Title", abstract: "", bodyMarkdown: "# Title\n\nBody", tags: [] }, sourceRevision: new SourceRevision("session", ["turn"], "hash"), model: null, createdAt: "now" });
     const receipt = await publisher.publish({ documentId: "doc", version, target: new AppleNotesPublicationTarget(null, "Synapse"), existingExternalId: "note-1" });
     expect(receipt).toEqual({ externalId: "note-1", updated: true });
     const payload = JSON.parse(captured) as { existingExternalId: string; folder: string; title: string; html: string };
@@ -28,7 +28,7 @@ describe("AppleNotesSummaryPublisher", () => {
   it.each(["The configured Apple Notes folder no longer exists.", "The linked Apple Note no longer exists; relink it before retrying."])("preserves an actionable publish error: %s", async (message) => {
     const executor: AppleScriptExecutor = { async execute() { throw new Error(message); } };
     const publisher = new AppleNotesSummaryPublisher("/fixed/script.jxa", logger, executor);
-    const version = new SummaryVersion({ id: "v", documentId: "doc", sequence: 1, kind: "final", generationMode: "merge", baseVersionId: "base", content: { title: "Title", abstract: "", bodyMarkdown: "Body", tags: [] }, sourceRevision: new SourceRevision("session", ["turn"], "hash"), model: null, createdAt: "now" });
+    const version = new SummaryVersion({ id: "v", documentId: "doc", sequence: 1, kind: "final", generationMode: "merge", operation: "finalize", parentVersionId: "base", baseVersionId: "base", content: { title: "Title", abstract: "", bodyMarkdown: "Body", tags: [] }, sourceRevision: new SourceRevision("session", ["turn"], "hash"), model: null, createdAt: "now" });
     await expect(publisher.publish({ documentId: "doc", version, target: new AppleNotesPublicationTarget(null, "Synapse"), existingExternalId: "note-1" })).rejects.toThrow(message);
   });
 });

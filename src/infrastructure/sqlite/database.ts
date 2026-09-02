@@ -313,6 +313,37 @@ export class NodeSqliteSynapseDatabase implements SynapseDatabase {
         this.connection.exec("PRAGMA user_version = 5");
       });
     }
+    if (version < 6) {
+      this.migrateTransaction(() => {
+        if (this.tableExists("summary_versions")) {
+          if (!this.columnExists("summary_versions", "parent_version_id")) {
+            this.connection.exec("ALTER TABLE summary_versions ADD COLUMN parent_version_id TEXT REFERENCES summary_versions(id)");
+          }
+          if (!this.columnExists("summary_versions", "operation")) {
+            this.connection.exec(`ALTER TABLE summary_versions ADD COLUMN operation TEXT NOT NULL DEFAULT 'generate'
+              CHECK(operation IN ('generate','merge','regenerate','manual-edit','finalize'))`);
+          }
+          this.connection.exec(`UPDATE summary_versions AS current
+            SET parent_version_id = (
+              SELECT previous.id FROM summary_versions AS previous
+              WHERE previous.document_id = current.document_id AND previous.sequence = current.sequence - 1
+            )
+            WHERE current.sequence > 0 AND current.parent_version_id IS NULL`);
+          this.connection.exec(`UPDATE summary_versions
+            SET operation = CASE
+              WHEN kind = 'edited-draft' THEN 'manual-edit'
+              WHEN kind = 'final' THEN 'finalize'
+              WHEN generation_mode = 'merge' THEN 'merge'
+              WHEN sequence = 0 THEN 'generate'
+              ELSE 'regenerate'
+            END`);
+          this.connection.exec("CREATE INDEX IF NOT EXISTS idx_summary_versions_parent ON summary_versions(parent_version_id)");
+        }
+        const now = new Date().toISOString();
+        this.connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (6, ?)").run(now);
+        this.connection.exec("PRAGMA user_version = 6");
+      });
+    }
   }
 
   private tableExists(name: string): boolean {

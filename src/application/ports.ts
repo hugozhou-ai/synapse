@@ -261,6 +261,10 @@ export interface TextClipboardGateway {
   writeText(value: string): void;
 }
 
+export interface CodexSessionNavigator {
+  open(threadId: string): Promise<void>;
+}
+
 export interface CodexPluginInstallationStatus {
   readonly installed: boolean;
   readonly current: boolean;
