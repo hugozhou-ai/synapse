@@ -1,5 +1,6 @@
-import { app } from "electron";
+import { app, dialog } from "electron";
 import { ElectronApplicationContainer } from "./container";
+import { isInstallerVolumeExecutable } from "./installation-location";
 import { ElectronIpcController } from "./ipc-controller";
 import { ElectronWindowManager } from "./window-manager";
 
@@ -10,6 +11,20 @@ let windows: ElectronWindowManager | null = null;
 let quitting = false;
 
 app.whenReady().then(async () => {
+  if (app.isPackaged && isInstallerVolumeExecutable(process.execPath)) {
+    console.error(`[synapse:install-location] ${JSON.stringify({ executablePath: process.execPath })}`);
+    dialog.showMessageBoxSync({
+      type: "warning",
+      title: "请先安装 Synapse",
+      message: "Synapse 正在从安装镜像运行",
+      detail: "请将 Synapse 拖入“应用程序”文件夹，弹出安装镜像，然后从“应用程序”启动。",
+      buttons: ["退出"],
+      defaultId: 0,
+    });
+    app.quit();
+    return;
+  }
+
   container = await ElectronApplicationContainer.create(app, () => windows?.broadcastSessionsChanged());
   container.logger.info("[synapse:main]", "application-starting", { version: app.getVersion(), packaged: app.isPackaged });
   windows = new ElectronWindowManager(container.settings, container.hookManagement, container.logger);
