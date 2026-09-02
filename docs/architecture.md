@@ -4,7 +4,7 @@
 
 - `src/domain` 是纯领域层，不依赖 Electron、Node、SQLite、JSON-RPC 或 AppleScript。
 - `src/application` 只编排领域模型与 ports，不拼 SQL 或协议 DTO。
-- `src/infrastructure` 实现数据库、Hook、App Server、Notes 和系统对话框适配器。
+- `src/infrastructure` 实现数据库、Hook、App Server、外部发布和系统对话框适配器。
 - `src/main` 是唯一 Composition Root，并负责 IPC controller 与 Electron 窗口生命周期。
 - `src/renderer` 只能调用类型化 `window.synapse` preload API。
 
@@ -20,7 +20,7 @@
 | 总结上下文 | `SummaryContextService` | `NormalizedTurnSummaryContextService` |
 | 总结生成 | `SummaryGenerationService` | `DestinationAwareSummaryGenerationService` |
 | 草稿/final | `SummaryFinalizationService` | `VersionedSummaryFinalizationService` |
-| Notes 发布编排 | `SummaryPublicationService` | `OutboxSummaryPublicationService` |
+| 外部发布编排 | `SummaryPublicationService` | `OutboxSummaryPublicationService` |
 | Hook 安装 | `HookManagementService` | `CodexHookManagementService` |
 | 会话查询 | `SessionQueryService` | `RepositorySessionQueryService` |
 | 总结查询 | `SummaryQueryService` | `RepositorySummaryQueryService` |
@@ -59,6 +59,8 @@
 - `CodexAppServerClient` → `StdioCodexAppServerClient`
 - `SummaryAgentGateway` → `CodexAppServerSummaryAgentGateway`
 - `SummaryPublisher` → `AppleNotesSummaryPublisher`
+- `SummaryPublisher` → `CodexAppServerNotionPublisher`
+- `PublicationPublisherRegistry` → `FixedPublicationPublisherRegistry`
 - `NotesTargetGateway` → `AppleNotesSummaryPublisher`
 - `AppServerRuntimeStatusProvider` → `LazyCodexAppServerRuntime`
 - `ExportGateway` → `ElectronExportGateway`
@@ -69,9 +71,9 @@ Hook 原始 DTO 通过 `CodexHookProtocolMapper` 转换，绝不直接进入领�
 
 1. Hook ingest：去重事件、完整 prompt/assistant 内容、session/turn 更新与领域 event outbox 在同一 `BEGIN IMMEDIATE` 事务中提交。Receiver 只在事务提交后返回 `OK`，Relay 未收到 ACK 必须写入离线 spool。
 2. 总结生成：从已提交的本地 turns 构造上下文。新建模式携带整理方案；融合模式携带 SQLite 当前完整内容和基础版本，严禁携带整理方案。先创建 job 并提交，再调用 agent；完成后在独立事务校验基础版本并写 draft 和阶段覆盖信息。agent 调用期间不持有 SQLite 事务。
-3. Finalize：不可变 final、`currentVersionId`、版本记录的 source session summarized 和 Notes outbox 同一事务提交。融合模式仅在目标存在有效 Notes external id 时自动发布。
-4. Notes worker：一个 outbox 自动尝试一次。失败保留明确错误，等待用户点击重试；成功记录固定 Notes identifier 并关闭同一文档的待处理消息。
-5. 删除总结：全文索引、版本、生成任务、Notes 本地发布记录和 outbox 与文档在同一事务删除；逐一检查该文档所有 final 的 source session，仅在某个 session 不再被其他 final 引用时恢复它。仓储严格区分 create/update，后台旧任务不能重新创建已删除文档。
+3. Finalize：不可变 final、`currentVersionId`、版本记录的 source session summarized 和 publication outbox 同一事务提交。融合模式仅在目标存在有效 external id 时自动发布。
+4. Publication worker：一个 outbox 自动尝试一次。失败保留明确错误，等待用户点击重试；成功记录固定 Notes identifier 或 Notion page ID，并关闭同一文档的待处理消息。
+5. 删除总结：全文索引、版本、生成任务、本地发布记录和 outbox 与文档在同一事务删除；逐一检查该文档所有 final 的 source session，仅在某个 session 不再被其他 final 引用时恢复它。仓储严格区分 create/update，后台旧任务不能重新创建已删除文档。
 
 ## App Server harness
 
@@ -100,7 +102,7 @@ Renderer 顶层由 `RendererErrorBoundary` 隔离渲染异常，并通过类型�
 
 每个总结版本保存 `source_session_id`、`generation_mode` 和可选 `base_version_id`。因此一份总结可以累计来自多个 Codex session 的事实，同时保留逐版本来源。融合任务同时按 source session 和目标 document 排他；agent 返回后必须确认 `currentVersionId` 仍等于开始时的基础版本，否则以 `SUMMARY_TARGET_CHANGED` 失败，不追加兜底内容。
 
-SQLite Markdown 是权威内容源，Apple Notes 仅是按固定 external id 更新的单向发布副本；Synapse 不从 Notes 回读正文。
+SQLite Markdown 是权威内容源，Apple Notes 和 Notion 仅是按固定 external id 更新的单向发布副本。Notion publisher 为每次调用创建 ephemeral App Server thread，读取 `codex_apps` 的工具清单后直接调用 `notion.notion-create-pages` 或 `notion.notion-update-page`；凭据完全由 Codex 的 App 连接管理。
 
 ## Renderer feature 边界
 

@@ -5,14 +5,19 @@ import type {
   AppServerRuntimeStatusProvider,
   HookTrustGateway,
   HookTrustState,
+  NotionConnectionGateway,
+  PublicationReceipt,
+  PublishSummaryRequest,
   SummaryAgentGateway,
   SummaryAgentRequest,
+  SummaryPublisher,
 } from "@application/ports";
+import type { NotionConnectionView } from "@application/contracts";
 import type { GeneratedSummary } from "@domain/conversation";
 import { DomainError } from "@domain/shared";
 import type { Logger } from "@shared/logger";
 import { StdioCodexAppServerClient, type CodexAppServerClient } from "./client";
-import { AppServerHookTrustGateway, CodexAppServerSummaryAgentGateway } from "./gateways";
+import { AppServerHookTrustGateway, CodexAppServerNotionPublisher, CodexAppServerSummaryAgentGateway } from "./gateways";
 import { CodexBinaryResolver } from "./resolver";
 import { CodexAppServerSupervisor } from "./supervisor";
 
@@ -20,6 +25,7 @@ interface ActiveAdapters {
   readonly client: CodexAppServerClient;
   readonly agent: CodexAppServerSummaryAgentGateway;
   readonly trust: AppServerHookTrustGateway;
+  readonly notion: CodexAppServerNotionPublisher;
 }
 
 export function appServerAgentRuntimeDirectory(supportDirectory: string): string {
@@ -29,7 +35,10 @@ export function appServerAgentRuntimeDirectory(supportDirectory: string): string
 export class LazyCodexAppServerRuntime implements
   SummaryAgentGateway,
   HookTrustGateway,
-  AppServerRuntimeStatusProvider {
+  AppServerRuntimeStatusProvider,
+  SummaryPublisher,
+  NotionConnectionGateway {
+  readonly kind = "notion" as const;
   private initialization: Promise<void> | null = null;
   private adapters: ActiveAdapters | null = null;
   private initializingClient: CodexAppServerClient | null = null;
@@ -63,6 +72,14 @@ export class LazyCodexAppServerRuntime implements
 
   async listModels(): Promise<readonly AgentModel[]> {
     return (await this.requireAdapters()).agent.listModels();
+  }
+
+  async publish(request: PublishSummaryRequest): Promise<PublicationReceipt> {
+    return (await this.requireAdapters()).notion.publish(request);
+  }
+
+  async inspectConnection(): Promise<NotionConnectionView> {
+    return (await this.requireAdapters()).notion.inspectConnection();
   }
 
   async inspect(cwds: readonly string[], ownedCommand: string, ownedSourcePath: string): Promise<readonly HookTrustState[]> {
@@ -119,6 +136,7 @@ export class LazyCodexAppServerRuntime implements
             client,
             agent: new CodexAppServerSummaryAgentGateway(client, appServerAgentRuntimeDirectory(this.supportDirectory)),
             trust: new AppServerHookTrustGateway(client),
+            notion: new CodexAppServerNotionPublisher(client, appServerAgentRuntimeDirectory(this.supportDirectory), this.logger),
           };
           this.initializingClient = null;
           this.status = { state: "available", available: true, binaryPath: binary.path, version: binary.version, authentication, error: null };

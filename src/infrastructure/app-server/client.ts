@@ -20,6 +20,7 @@ export interface CodexAppServerClient {
   connect(): Promise<void>;
   request<T>(method: string, params: unknown): Promise<T>;
   subscribe(listener: (notification: CodexNotification) => void): Unsubscribe;
+  authorizeMcp?(threadId: string, serverName: string): Unsubscribe;
   close(): Promise<void>;
 }
 
@@ -56,6 +57,7 @@ export class StdioCodexAppServerClient implements CodexAppServerClient {
   private lines: ReadLineInterface | null = null;
   private readonly requests = new JsonRpcRequestRegistry();
   private readonly listeners = new Set<(notification: CodexNotification) => void>();
+  private readonly authorizedMcpThreads = new Map<string, string>();
   private connecting: Promise<void> | null = null;
 
   constructor(
@@ -81,6 +83,11 @@ export class StdioCodexAppServerClient implements CodexAppServerClient {
 
   subscribe(listener: (notification: CodexNotification) => void): Unsubscribe {
     this.listeners.add(listener); return () => this.listeners.delete(listener);
+  }
+
+  authorizeMcp(threadId: string, serverName: string): Unsubscribe {
+    this.authorizedMcpThreads.set(threadId, serverName);
+    return () => this.authorizedMcpThreads.delete(threadId);
   }
 
   async close(): Promise<void> {
@@ -140,7 +147,7 @@ export class StdioCodexAppServerClient implements CodexAppServerClient {
     let message: { id?: unknown; method?: unknown; params?: unknown; result?: unknown; error?: { code?: unknown; message?: unknown } };
     try { message = JSON.parse(line) as typeof message; }
     catch (error) { this.logger.error("[synapse:app-server]", "invalid-json", { message: error instanceof Error ? error.message : String(error) }); return; }
-    if (typeof message.id === "number" && typeof message.method === "string") { this.rejectServerRequest(message); return; }
+    if (typeof message.id === "number" && typeof message.method === "string") { this.respondToServerRequest(message); return; }
     if (typeof message.id === "number") {
       if (message.error) this.requests.reject(message.id, new CodexAppServerRpcError(message.error.code, String(message.error.message)));
       else this.requests.resolve(message.id, message.result);
@@ -152,13 +159,20 @@ export class StdioCodexAppServerClient implements CodexAppServerClient {
     }
   }
 
-  private rejectServerRequest(message: { id?: unknown; method?: unknown }): void {
+  private respondToServerRequest(message: { id?: unknown; method?: unknown; params?: unknown }): void {
     const method = String(message.method);
     let result: unknown = { decision: "decline" };
     if (method === "item/permissions/requestApproval") result = { permissions: {}, scope: "turn", strictAutoReview: true };
-    if (method === "item/tool/requestUserInput") result = { answers: {} };
+    if (method === "item/tool/requestUserInput") result = this.mcpApprovalResponse(message.params);
+    if (method === "mcpServer/elicitation/request") result = { action: "decline", content: null, _meta: null };
     this.send({ id: message.id, result });
-    this.logger.error("[synapse:app-server]", "unexpected-server-request-rejected", { method });
+    const details = { details: JSON.stringify({ method, accepted: hasAnswers(result) }) };
+    if (hasAnswers(result)) this.logger.info("[synapse:app-server]", "server-request-resolved", details);
+    else this.logger.error("[synapse:app-server]", "server-request-resolved", details);
+  }
+
+  private mcpApprovalResponse(params: unknown): { answers: Record<string, { answers: string[] }> } {
+    return createMcpApprovalResponse(params, (threadId) => this.authorizedMcpThreads.has(threadId));
   }
 
   private handleExit(child: ChildProcessWithoutNullStreams, error: Error): void {
@@ -166,6 +180,28 @@ export class StdioCodexAppServerClient implements CodexAppServerClient {
     this.process = null; this.requests.rejectAll(toTransportError(error));
     this.logger.error("[synapse:app-server]", "process-exited", { message: error.message });
   }
+}
+
+export function createMcpApprovalResponse(params: unknown, isAuthorized: (threadId: string) => boolean): { answers: Record<string, { answers: string[] }> } {
+  if (!params || typeof params !== "object") return { answers: {} };
+  const input = params as { threadId?: unknown; questions?: unknown };
+  const threadId = String(input.threadId ?? "");
+  if (!isAuthorized(threadId) || !Array.isArray(input.questions)) return { answers: {} };
+  const answers: Record<string, { answers: string[] }> = {};
+  for (const raw of input.questions) {
+    if (!raw || typeof raw !== "object") return { answers: {} };
+    const question = raw as { id?: unknown; options?: unknown };
+    if (typeof question.id !== "string" || !Array.isArray(question.options)) return { answers: {} };
+    const accept = question.options.find((option) => option && typeof option === "object" && /^(accept|allow)$/i.test(String((option as { label?: unknown }).label ?? ""))) as { label?: unknown } | undefined;
+    if (!accept || typeof accept.label !== "string") return { answers: {} };
+    answers[question.id] = { answers: [accept.label] };
+  }
+  return { answers };
+}
+
+function hasAnswers(value: unknown): boolean {
+  if (!value || typeof value !== "object" || !("answers" in value)) return false;
+  return Object.keys((value as { answers: Record<string, unknown> }).answers).length > 0;
 }
 
 function toTransportError(error: unknown): CodexAppServerTransportError {

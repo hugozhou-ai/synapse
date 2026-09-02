@@ -10,7 +10,7 @@ describe("HistoryPage", () => {
   it("requires an inline confirmation before deleting the selected summary", async () => {
     const remove = vi.fn().mockResolvedValue(undefined);
     const detail: SummaryDetailView = {
-      id: "doc", reference: { uri: "synapse://summary/doc?v=version", text: "[[Synapse:Summary title|synapse://summary/doc?v=version]]" }, publicationStatus: "not-requested", notesLinked: false,
+      id: "doc", reference: { uri: "synapse://summary/doc?v=version", text: "[[Synapse:Summary title|synapse://summary/doc?v=version]]" }, publicationStatus: "not-requested", notesLinked: false, notionLinked: false, publisher: null,
       currentVersion: { id: "version", kind: "agent-draft", generationMode: "new", sourceSessionId: "session", sourceTurnIds: ["turn"], baseVersionId: null, content: { title: "Summary title", abstract: "Abstract", bodyMarkdown: "Body", tags: [] }, createdAt: "2026-01-01T00:00:00.000Z" },
       versions: [{ id: "version", kind: "agent-draft", generationMode: "new", sourceSessionId: "session", sourceTurnIds: ["turn"], baseVersionId: null, createdAt: "2026-01-01T00:00:00.000Z" }],
     };
@@ -34,7 +34,7 @@ describe("HistoryPage", () => {
   it("copies and exposes the selected immutable summary reference for dragging", async () => {
     const copyReference = vi.fn().mockResolvedValue(undefined);
     const detail: SummaryDetailView = {
-      id: "doc", reference: { uri: "synapse://summary/doc?v=version", text: "[[Synapse:Summary title|synapse://summary/doc?v=version]]" }, publicationStatus: "not-requested", notesLinked: false,
+      id: "doc", reference: { uri: "synapse://summary/doc?v=version", text: "[[Synapse:Summary title|synapse://summary/doc?v=version]]" }, publicationStatus: "not-requested", notesLinked: false, notionLinked: false, publisher: null,
       currentVersion: { id: "version", kind: "final", generationMode: "new", sourceSessionId: "session", sourceTurnIds: ["turn"], baseVersionId: null, content: { title: "Summary title", abstract: "Abstract", bodyMarkdown: "Body", tags: [] }, createdAt: "2026-01-01T00:00:00.000Z" },
       versions: [],
     };

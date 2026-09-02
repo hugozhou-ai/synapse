@@ -256,10 +256,71 @@ export class NodeSqliteSynapseDatabase implements SynapseDatabase {
         this.connection.exec("PRAGMA user_version = 4");
       });
     }
+    if (version < 5) {
+      this.migrateTransaction(() => {
+        if (this.tableExists("summary_documents")) {
+          if (!this.columnExists("summary_documents", "publication_target_json")) {
+            this.connection.exec("ALTER TABLE summary_documents ADD COLUMN publication_target_json TEXT");
+          }
+          if (this.columnExists("summary_documents", "notes_folder")) {
+            this.connection.exec(`UPDATE summary_documents
+              SET publication_target_json = json_object('kind', 'apple-notes', 'account', notes_account, 'folder', notes_folder)
+              WHERE notes_folder IS NOT NULL`);
+            this.connection.exec("ALTER TABLE summary_documents DROP COLUMN notes_account");
+            this.connection.exec("ALTER TABLE summary_documents DROP COLUMN notes_folder");
+          }
+        }
+        if (!this.tableExists("publications")) {
+          this.connection.exec(`CREATE TABLE publications (
+            document_id TEXT PRIMARY KEY REFERENCES summary_documents(id) ON DELETE CASCADE,
+            publisher TEXT NOT NULL CHECK(publisher IN ('apple-notes','notion')),
+            external_id TEXT,
+            target_json TEXT NOT NULL,
+            version_id TEXT NOT NULL REFERENCES summary_versions(id),
+            status TEXT NOT NULL CHECK(status IN ('pending','published','failed')),
+            error TEXT,
+            updated_at TEXT NOT NULL
+          )`);
+        }
+        if (this.tableExists("notes_exports")) {
+          this.connection.exec(`INSERT INTO publications(document_id,publisher,external_id,target_json,version_id,status,error,updated_at)
+            SELECT document_id,'apple-notes',external_id,json_object('kind','apple-notes','account',account,'folder',folder),version_id,status,error,updated_at
+            FROM notes_exports`);
+          this.connection.exec("DROP TABLE notes_exports");
+        }
+        if (this.tableExists("outbox")) {
+          this.connection.exec("ALTER TABLE outbox RENAME TO legacy_outbox");
+        }
+        this.connection.exec(`CREATE TABLE IF NOT EXISTS outbox (
+            id TEXT PRIMARY KEY,
+            kind TEXT NOT NULL CHECK(kind IN ('domain-event','publication-sync')),
+            aggregate_id TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            processed_at TEXT,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            last_error TEXT
+          )`);
+        if (this.tableExists("legacy_outbox")) {
+          this.connection.exec(`INSERT INTO outbox(id,kind,aggregate_id,payload_json,created_at,processed_at,attempts,last_error)
+            SELECT id,CASE kind WHEN 'notes-sync' THEN 'publication-sync' ELSE kind END,aggregate_id,payload_json,created_at,processed_at,attempts,last_error
+            FROM legacy_outbox`);
+          this.connection.exec("DROP TABLE legacy_outbox");
+        }
+        this.connection.exec("CREATE INDEX IF NOT EXISTS idx_outbox_pending ON outbox(kind, processed_at, created_at)");
+        const now = new Date().toISOString();
+        this.connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (5, ?)").run(now);
+        this.connection.exec("PRAGMA user_version = 5");
+      });
+    }
   }
 
   private tableExists(name: string): boolean {
     return this.connection.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name) !== undefined;
+  }
+
+  private columnExists(table: string, column: string): boolean {
+    return (this.connection.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).some((item) => item.name === column);
   }
 
   private migrateTransaction(operation: () => void): void {

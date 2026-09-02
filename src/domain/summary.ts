@@ -4,6 +4,7 @@ export type SummaryProfileKind = "template" | "systemPrompt";
 export type SummaryVersionKind = "agent-draft" | "edited-draft" | "final";
 export type SummaryGenerationMode = "new" | "merge";
 export type PublicationStatus = "not-requested" | "pending" | "published" | "failed";
+export type PublisherKind = "apple-notes" | "notion";
 
 export class TurnSelection {
   readonly turnIds: readonly string[];
@@ -41,9 +42,19 @@ export class SourceRevision {
   }
 }
 
-export class PublicationTarget {
+export type PublicationTarget = AppleNotesPublicationTarget | NotionPublicationTarget;
+
+export class AppleNotesPublicationTarget {
+  readonly kind = "apple-notes" as const;
   constructor(readonly account: string | null, readonly folder: string) {
     if (!folder.trim()) throw new DomainError("INVALID_PUBLICATION_TARGET", "Apple Notes folder is required.");
+  }
+}
+
+export class NotionPublicationTarget {
+  readonly kind = "notion" as const;
+  constructor(readonly parentPageId: string) {
+    if (!parentPageId.trim()) throw new DomainError("INVALID_PUBLICATION_TARGET", "Notion parent page ID is required.");
   }
 }
 

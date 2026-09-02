@@ -34,7 +34,7 @@ describe("SQLite repository contract", () => {
     try {
       const row = database.connection.prepare("SELECT prompt_content, assistant_content FROM codex_turns").get() as { prompt_content: string; assistant_content: string };
       expect(row).toEqual({ prompt_content: "prompt", assistant_content: "assistant" });
-      expect((database.connection.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(4);
+      expect((database.connection.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(5);
     } finally { database.close(); }
   });
 
@@ -45,7 +45,10 @@ describe("SQLite repository contract", () => {
     legacy.exec(`
       CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
       CREATE TABLE codex_sessions(id TEXT PRIMARY KEY);
-      CREATE TABLE summary_documents(id TEXT PRIMARY KEY, session_id TEXT NOT NULL);
+      CREATE TABLE summary_documents(
+        id TEXT PRIMARY KEY, session_id TEXT NOT NULL, notes_account TEXT, notes_folder TEXT,
+        publication_status TEXT NOT NULL DEFAULT 'not-requested'
+      );
       CREATE TABLE summary_versions(
         id TEXT PRIMARY KEY, document_id TEXT NOT NULL, sequence INTEGER NOT NULL, kind TEXT NOT NULL,
         title TEXT NOT NULL, abstract TEXT NOT NULL, body_markdown TEXT NOT NULL, tags_json TEXT NOT NULL,
@@ -57,10 +60,20 @@ describe("SQLite repository contract", () => {
         covered_turn_ids_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
         stage_coverage_json TEXT NOT NULL DEFAULT '[]'
       );
+      CREATE TABLE notes_exports(
+        document_id TEXT PRIMARY KEY, publisher TEXT NOT NULL, external_id TEXT, account TEXT, folder TEXT NOT NULL,
+        version_id TEXT NOT NULL, status TEXT NOT NULL, error TEXT, updated_at TEXT NOT NULL
+      );
+      CREATE TABLE outbox(
+        id TEXT PRIMARY KEY, kind TEXT NOT NULL, aggregate_id TEXT NOT NULL, payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL, processed_at TEXT, attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT
+      );
       INSERT INTO codex_sessions VALUES ('source');
-      INSERT INTO summary_documents VALUES ('doc', 'source');
+      INSERT INTO summary_documents VALUES ('doc', 'source', NULL, 'Synapse', 'published');
       INSERT INTO summary_versions VALUES ('version', 'doc', 0, 'final', 'T', '', 'B', '[]', '["turn"]', 'hash', NULL, '{}', 'now');
       INSERT INTO summary_jobs VALUES ('job', 'doc', 'succeeded', NULL, '["turn"]', 'now', 'now', '[]');
+      INSERT INTO notes_exports VALUES ('doc', 'apple-notes', 'note-1', NULL, 'Synapse', 'version', 'published', NULL, 'now');
+      INSERT INTO outbox VALUES ('message', 'notes-sync', 'doc', '{}', 'now', NULL, 0, NULL);
       INSERT INTO schema_migrations VALUES (1, 'a'), (2, 'b'), (3, 'c');
       PRAGMA user_version = 3;
     `);
@@ -71,7 +84,11 @@ describe("SQLite repository contract", () => {
       const job = database.connection.prepare("SELECT source_session_id,generation_mode,base_version_id FROM summary_jobs").get() as { source_session_id: string; generation_mode: string; base_version_id: string | null };
       expect(version).toEqual({ source_session_id: "source", generation_mode: "new", base_version_id: null });
       expect(job).toEqual({ source_session_id: "source", generation_mode: "new", base_version_id: null });
-      expect((database.connection.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(4);
+      expect(database.connection.prepare("SELECT publisher,external_id,target_json FROM publications").get()).toEqual({
+        publisher: "apple-notes", external_id: "note-1", target_json: JSON.stringify({ kind: "apple-notes", account: null, folder: "Synapse" }),
+      });
+      expect(database.connection.prepare("SELECT kind FROM outbox").get()).toEqual({ kind: "publication-sync" });
+      expect((database.connection.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(5);
     } finally { database.close(); }
   });
 
@@ -94,8 +111,8 @@ describe("SQLite repository contract", () => {
       await summaries.create(document);
       document.finalize(new SummaryVersion({ id: "final", documentId: "doc", sequence: 1, kind: "final", generationMode: "new", baseVersionId: null, content: { title: "Search implementation", abstract: "SQLite FTS", bodyMarkdown: "Implemented a searchable archive.", tags: ["search"] }, sourceRevision: revision, model: "model", createdAt: "2026-01-01T00:00:05.000Z" }), false);
       await summaries.save(document);
-      database.connection.prepare("INSERT INTO notes_exports(document_id,publisher,external_id,account,folder,version_id,status,error,updated_at) VALUES (?,?,?,?,?,?,?,?,?)")
-        .run("doc", "apple-notes", "note-1", null, "Synapse", "final", "published", null, "2026-01-01T00:00:06.000Z");
+      database.connection.prepare("INSERT INTO publications(document_id,publisher,external_id,target_json,version_id,status,error,updated_at) VALUES (?,?,?,?,?,?,?,?)")
+        .run("doc", "apple-notes", "note-1", JSON.stringify({ kind: "apple-notes", account: null, folder: "Synapse" }), "final", "published", null, "2026-01-01T00:00:06.000Z");
       expect((await summaries.findById("doc"))?.snapshot.versions).toHaveLength(2);
       const result = await summaries.search({ text: "searchable", limit: 20, offset: 0 });
       expect(result.total).toBe(1); expect(result.items[0]).toMatchObject({ documentId: "doc", notesLinked: true });
@@ -116,7 +133,7 @@ describe("SQLite repository contract", () => {
       });
       await enteredTransaction;
       let outsideCompleted = false;
-      const outside = settings.save({ codexBinaryPath: null, summaryModel: "model", syncNotesByDefault: false, notesAccount: null, notesFolder: "Synapse", widgetVisible: true, widgetPositions: {}, widgetDisplayId: null, hookSetupAcknowledged: false }).then(() => { outsideCompleted = true; });
+      const outside = settings.save({ codexBinaryPath: null, summaryModel: "model", defaultPublicationKind: null, notionParentPageId: "", notesAccount: null, notesFolder: "Synapse", widgetVisible: true, widgetPositions: {}, widgetDisplayId: null, hookSetupAcknowledged: false }).then(() => { outsideCompleted = true; });
       await new Promise((resolve) => setTimeout(resolve, 20));
       expect(outsideCompleted).toBe(false);
       unblock();

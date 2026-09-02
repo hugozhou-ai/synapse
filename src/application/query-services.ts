@@ -1,6 +1,6 @@
 import { SummaryProfile } from "@domain/summary";
-import type { AgentModel, ApplicationSettings, ApplicationSettingsUpdate, AppServerRuntimeStatus, AppServerRuntimeStatusProvider, Clock, CodexSessionRepository, ExportGateway, IdGenerator, NotesTargetGateway, PublicationRepository, SettingsRepository, SummaryAgentGateway, SummaryDocumentRepository, SummaryJobRepository, SummaryProfileRepository, SummarySearchCriteria, SummarySearchResult, UnitOfWork } from "./ports";
-import type { ConversationTurnsView, NotesTargetsView, SaveProfileCommand, SummaryDetailView, SummaryProfileView, WidgetSessionView } from "./contracts";
+import type { AgentModel, ApplicationSettings, ApplicationSettingsUpdate, AppServerRuntimeStatus, AppServerRuntimeStatusProvider, Clock, CodexSessionRepository, ExportGateway, IdGenerator, NotesTargetGateway, NotionConnectionGateway, PublicationRepository, SettingsRepository, SummaryAgentGateway, SummaryDocumentRepository, SummaryJobRepository, SummaryProfileRepository, SummarySearchCriteria, SummarySearchResult, UnitOfWork } from "./ports";
+import type { ConversationTurnsView, NotesTargetsView, NotionConnectionView, SaveProfileCommand, SummaryDetailView, SummaryProfileView, WidgetSessionView } from "./contracts";
 import { DomainError } from "@domain/shared";
 import { formatSummaryReference } from "./summary-reference";
 
@@ -71,12 +71,14 @@ export class RepositorySummaryQueryService implements SummaryQueryService {
     const document = await this.summaries.findById(documentId);
     if (!document) throw new DomainError("SUMMARY_NOT_FOUND", "Summary document does not exist.");
     const current = document.currentVersion;
-    const publication = await this.publications.find(document.id, "apple-notes");
+    const publication = await this.publications.find(document.id);
     return {
       id: document.id,
       reference: current ? formatSummaryReference(document.id, current.props.id, current.props.content.title) : null,
       publicationStatus: document.snapshot.publicationStatus,
-      notesLinked: Boolean(publication?.externalId),
+      notesLinked: publication?.publisher === "apple-notes" && Boolean(publication.externalId),
+      notionLinked: publication?.publisher === "notion" && Boolean(publication.externalId),
+      publisher: publication?.publisher ?? null,
       currentVersion: current ? {
         id: current.props.id, kind: current.props.kind, generationMode: current.props.generationMode,
         sourceSessionId: current.props.sourceRevision.sessionId, sourceTurnIds: current.props.sourceRevision.turnIds,
@@ -118,6 +120,7 @@ export interface SettingsApplicationService {
   update(command: ApplicationSettingsUpdate): Promise<ApplicationSettings>;
   listModels(): Promise<readonly AgentModel[]>;
   listNotesTargets(): Promise<NotesTargetsView>;
+  inspectNotionConnection(): Promise<NotionConnectionView>;
   runtime(): Promise<AppServerRuntimeStatus>;
 }
 
@@ -127,6 +130,7 @@ export class PersistentSettingsApplicationService implements SettingsApplication
     private readonly agent: SummaryAgentGateway,
     private readonly runtimeStatus: AppServerRuntimeStatusProvider,
     private readonly notesTargets: NotesTargetGateway,
+    private readonly notion: NotionConnectionGateway,
     private readonly unitOfWork: UnitOfWork,
   ) {}
   read(): Promise<ApplicationSettings> { return this.settings.read(); }
@@ -139,6 +143,7 @@ export class PersistentSettingsApplicationService implements SettingsApplication
   }
   listModels(): Promise<readonly AgentModel[]> { return this.agent.listModels(); }
   listNotesTargets(): Promise<NotesTargetsView> { return this.notesTargets.listTargets(); }
+  inspectNotionConnection(): Promise<NotionConnectionView> { return this.notion.inspectConnection(); }
   runtime(): Promise<AppServerRuntimeStatus> { return this.runtimeStatus.current(); }
 }
 

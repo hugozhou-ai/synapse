@@ -82,11 +82,11 @@ function installSettingsApi(hookStatus?: HookInstallationStatus, trust = vi.fn()
     value: {
       settings: {
         read: vi.fn().mockResolvedValue({
-          codexBinaryPath: null, summaryModel: null, syncNotesByDefault: false, notesAccount: null, notesFolder: "Synapse",
+          codexBinaryPath: null, summaryModel: null, defaultPublicationKind: null, notionParentPageId: "", notesAccount: null, notesFolder: "Synapse",
           widgetVisible: true, widgetPositions: {}, widgetDisplayId: null, hookSetupAcknowledged: false,
         }),
         runtime: vi.fn().mockResolvedValue({ state: "available", available: true, binaryPath: "/codex", version: "1", authentication: "signed-in", error: null }),
-        models: vi.fn().mockResolvedValue([]), notesTargets: vi.fn().mockResolvedValue({ accounts: [] }), update: vi.fn(),
+        models: vi.fn().mockResolvedValue([]), notesTargets: vi.fn().mockResolvedValue({ accounts: [] }), notionConnection: vi.fn().mockResolvedValue({ available: true, connected: true, message: null }), update: vi.fn(),
       },
       hooks: {
         inspect: inspectHooks,

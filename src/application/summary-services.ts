@@ -6,7 +6,7 @@ import { DomainError } from "@domain/shared";
 import type {
   Clock, CodexSessionRepository, IdGenerator, OutboxRepository, PublicationRepository,
   SummaryAgentGateway, SummaryDocumentRepository, SummaryJobRepository, SummaryProfileRepository,
-  SummaryPublisher, TurnSelectionValidator, UnitOfWork,
+  PublicationPublisherRegistry, TurnSelectionValidator, UnitOfWork,
 } from "./ports";
 import type {
   FinalizeSummaryCommand, GenerateSummaryCommand, RegenerateSummaryCommand, SummaryDraft, UpdateDraftCommand,
@@ -37,7 +37,7 @@ export class TransactionalSummaryDeletionService implements SummaryDeletionServi
       const sourceSessionIds = [...new Set(document.snapshot.versions
         .filter((version) => version.isFinal)
         .map((version) => version.props.sourceRevision.sessionId))];
-      await this.outbox.deleteAggregate("notes-sync", documentId);
+      await this.outbox.deleteAggregate("publication-sync", documentId);
       await this.summaries.delete(documentId);
       for (const sessionId of sourceSessionIds) {
         if (await this.summaries.hasFinalBySessionId(sessionId)) continue;
@@ -284,11 +284,11 @@ export class VersionedSummaryFinalizationService implements SummaryFinalizationS
       const source = document.currentVersion;
       if (!source) throw new DomainError("DRAFT_NOT_FOUND", "Summary draft does not exist.");
       if (source.props.id !== command.expectedVersionId) throw targetChangedError();
-      const publication = await this.publications.find(document.id, "apple-notes");
+      const publication = await this.publications.find(document.id);
       const shouldPublish = Boolean(publication?.externalId)
         || (source.props.generationMode === "new" && document.snapshot.publicationTarget !== null);
       if (shouldPublish && !document.snapshot.publicationTarget) {
-        throw new DomainError("NOTES_TARGET_REQUIRED", "同步到 Apple Notes 前必须选择账户和文件夹。");
+        throw new DomainError("PUBLICATION_TARGET_REQUIRED", "同步到外部应用前必须选择发布目标。");
       }
       const now = this.clock.now();
       const version = new SummaryVersion({
@@ -300,7 +300,7 @@ export class VersionedSummaryFinalizationService implements SummaryFinalizationS
       const session = await this.sessions.findById(version.props.sourceRevision.sessionId);
       if (session) { session.markSummarized(now); await this.sessions.save(session); }
       if (shouldPublish) {
-        await this.outbox.add({ id: this.ids.next(), kind: "notes-sync", aggregateId: document.id, payload: { versionId: version.props.id }, createdAt: now, processedAt: null, attempts: 0, lastError: null });
+        await this.outbox.add({ id: this.ids.next(), kind: "publication-sync", aggregateId: document.id, payload: { versionId: version.props.id }, createdAt: now, processedAt: null, attempts: 0, lastError: null });
       }
       return version;
     });
@@ -322,7 +322,7 @@ export class OutboxSummaryPublicationService implements SummaryPublicationServic
   constructor(
     private readonly summaries: SummaryDocumentRepository,
     private readonly publications: PublicationRepository,
-    private readonly publisher: SummaryPublisher,
+    private readonly publishers: PublicationPublisherRegistry,
     private readonly clock: Clock,
     private readonly outbox?: OutboxRepository,
   ) {}
@@ -331,17 +331,18 @@ export class OutboxSummaryPublicationService implements SummaryPublicationServic
     const document = await this.summaries.findById(documentId);
     const version = document?.currentVersion;
     const target = document?.snapshot.publicationTarget;
-    if (!document || !version?.isFinal || !target) throw new DomainError("SUMMARY_NOT_PUBLISHABLE", "A final summary and Apple Notes target are required.");
-    const existing = await this.publications.find(documentId, "apple-notes");
+    if (!document || !version?.isFinal || !target) throw new DomainError("SUMMARY_NOT_PUBLISHABLE", "A final summary and publication target are required.");
+    const publisher = this.publishers.get(target.kind);
+    const existing = await this.publications.find(documentId, target.kind);
     try {
-      const receipt = await this.publisher.publish({ documentId, version, target, existingExternalId: existing?.externalId ?? null });
+      const receipt = await publisher.publish({ documentId, version, target, existingExternalId: existing?.externalId ?? null });
       const now = this.clock.now();
-      await this.publications.save({ documentId, publisher: "apple-notes", externalId: receipt.externalId, target, versionId: version.props.id, status: "published", error: null, updatedAt: now });
+      await this.publications.save({ documentId, publisher: target.kind, externalId: receipt.externalId, target, versionId: version.props.id, status: "published", error: null, updatedAt: now });
       document.markPublished(now); await this.summaries.save(document);
-      await this.outbox?.markAggregateProcessed("notes-sync", documentId, now);
+      await this.outbox?.markAggregateProcessed("publication-sync", documentId, now);
     } catch (error) {
       const now = this.clock.now();
-      await this.publications.save({ documentId, publisher: "apple-notes", externalId: existing?.externalId ?? null, target, versionId: version.props.id, status: "failed", error: error instanceof Error ? error.message : String(error), updatedAt: now });
+      await this.publications.save({ documentId, publisher: target.kind, externalId: existing?.externalId ?? null, target, versionId: version.props.id, status: "failed", error: error instanceof Error ? error.message : String(error), updatedAt: now });
       document.markPublicationFailed(now); await this.summaries.save(document);
       throw error;
     }

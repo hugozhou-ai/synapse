@@ -17,10 +17,10 @@ const api: SynapseApi = {
   summaries: {
     generate: (command) => invoke("summaries:generate", command), regenerate: (command) => invoke("summaries:regenerate", command), updateDraft: (command) => invoke("summaries:update", command),
     finalize: (command) => invoke("summaries:finalize", command), search: (query) => invoke("summaries:search", query),
-    get: (id) => invoke("summaries:get", id), copyReference: (documentId, versionId) => invoke("summaries:copy-reference", { documentId, versionId }), delete: (id) => invoke("summaries:delete", id), retryNotes: (id) => invoke("summaries:retry-notes", id),
+    get: (id) => invoke("summaries:get", id), copyReference: (documentId, versionId) => invoke("summaries:copy-reference", { documentId, versionId }), delete: (id) => invoke("summaries:delete", id), retryPublication: (id) => invoke("summaries:retry-publication", id),
   },
   profiles: { list: () => invoke("profiles:list"), save: (command) => invoke("profiles:save", command), delete: (id) => invoke("profiles:delete", id) },
-  settings: { read: () => invoke("settings:read"), update: (command) => invoke("settings:update", command), models: () => invoke("settings:models"), notesTargets: () => invoke("settings:notes-targets"), runtime: () => invoke("settings:runtime") },
+  settings: { read: () => invoke("settings:read"), update: (command) => invoke("settings:update", command), models: () => invoke("settings:models"), notesTargets: () => invoke("settings:notes-targets"), notionConnection: () => invoke("settings:notion-connection"), runtime: () => invoke("settings:runtime") },
   hooks: {
     inspect: () => invoke("hooks:inspect"), install: () => invoke("hooks:install"), trust: () => invoke("hooks:trust"), uninstall: () => invoke("hooks:uninstall"),
     dismissOnboarding: () => invoke("hooks:dismiss-onboarding"),

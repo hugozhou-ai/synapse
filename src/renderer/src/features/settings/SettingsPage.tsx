@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { BookOpen, Code2, NotebookPen, PackageCheck, Plus, ShieldCheck, Sparkles, Trash2, X } from "lucide-react";
 import type { AgentModel, ApplicationSettings, AppServerRuntimeStatus, CodexPluginInstallationStatus, HookInstallationStatus } from "@application/ports";
-import type { NotesTargetsView, SummaryProfileView } from "@application/contracts";
+import type { NotesTargetsView, NotionConnectionView, SummaryProfileView } from "@application/contracts";
 import { ErrorBanner, InfoBanner, PageHeader } from "../../components/common";
 import { NotesTargetPicker } from "../../components/NotesTargetPicker";
 import { Select } from "../../components/Select";
@@ -15,6 +15,7 @@ export function SettingsPage() {
   const [profiles, setProfiles] = useState<readonly SummaryProfileView[]>([]);
   const [models, setModels] = useState<readonly AgentModel[]>([]);
   const [notesTargets, setNotesTargets] = useState<NotesTargetsView | null>(null);
+  const [notionConnection, setNotionConnection] = useState<NotionConnectionView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notesError, setNotesError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -29,6 +30,7 @@ export function SettingsPage() {
       .catch((reason) => setError(messageOf(reason)));
     void window.synapse.settings.models().then(setModels).catch((reason) => setError(messageOf(reason)));
     void window.synapse.settings.notesTargets().then((value) => { setNotesTargets(value); setNotesError(null); }).catch((reason) => setNotesError(messageOf(reason)));
+    void window.synapse.settings.notionConnection().then(setNotionConnection).catch((reason) => setNotionConnection({ available: false, connected: false, message: messageOf(reason) }));
   }, []);
   useEffect(reload, [reload]);
   useEffect(() => {
@@ -43,7 +45,8 @@ export function SettingsPage() {
     try {
       setSettings(await window.synapse.settings.update({
         codexBinaryPath: settings.codexBinaryPath, summaryModel: settings.summaryModel,
-        syncNotesByDefault: settings.syncNotesByDefault, notesAccount: settings.notesAccount, notesFolder: settings.notesFolder,
+        defaultPublicationKind: settings.defaultPublicationKind, notesAccount: settings.notesAccount, notesFolder: settings.notesFolder,
+        notionParentPageId: settings.notionParentPageId,
         widgetVisible: settings.widgetVisible, widgetPositions: settings.widgetPositions, widgetDisplayId: settings.widgetDisplayId,
       }));
     } catch (reason) { setError(messageOf(reason)); } finally { setSaving(false); }
@@ -79,7 +82,7 @@ export function SettingsPage() {
       <div className="settings-title"><div className="setting-icon"><PackageCheck size={18} /></div><div><h2>Codex 引用插件</h2><p>仅在你粘贴 Synapse 引用后按需读取；不会默认注入总结正文。</p></div>{plugin && <span className={`health ${plugin.current ? "good" : "warn"}`}>{plugin.current ? "已安装" : plugin.installed ? "可更新" : "未安装"}</span>}</div>
       {plugin ? <><div className="hook-paths"><code>{plugin.pluginPath}</code><code>{plugin.marketplacePath}</code><code>随包版本：{plugin.bundledVersion}{plugin.installedVersion ? ` · 已安装：${plugin.installedVersion}` : ""}</code></div>{plugin.message && (plugin.current ? <InfoBanner message={plugin.message} /> : <ErrorBanner message={plugin.message} />)}<div className="row-actions"><button className="primary" disabled={saving || plugin.current} onClick={installPlugin}><Plus size={14} />{plugin.installed ? "更新引用插件" : "安装引用插件"}</button></div></> : <div className="hook-status-loading" role="status">正在检测引用插件…</div>}
     </section>
-    <section className="settings-section"><div className="settings-title"><div className="setting-icon"><NotebookPen size={18} /></div><div><h2>Apple Notes</h2><p>仅在 final 版本提交后同步，同一文档持续更新同一便签。</p></div></div><label className="toggle-row"><input type="checkbox" checked={settings?.syncNotesByDefault ?? false} onChange={(event) => settings && setSettings({ ...settings, syncNotesByDefault: event.target.checked })} /><span className="toggle" /><div><strong>默认同步到便签</strong><small>总结面板仍可单次覆盖</small></div></label>{notesError && <ErrorBanner message={`无法读取 Notes 目标：${notesError}`} />}{settings && <NotesTargetPicker targets={notesTargets} account={settings.notesAccount ?? ""} folder={settings.notesFolder} onAccountChange={(value) => setSettings({ ...settings, notesAccount: value || null })} onFolderChange={(value) => setSettings({ ...settings, notesFolder: value })} />}</section>
+    <section className="settings-section"><div className="settings-title"><div className="setting-icon"><NotebookPen size={18} /></div><div><h2>外部发布</h2><p>仅在 final 版本提交后执行，同一文档持续更新同一外部页面。</p></div></div>{settings && <label>默认发布目标<Select ariaLabel="默认发布目标" value={settings.defaultPublicationKind ?? ""} onChange={(value) => setSettings({ ...settings, defaultPublicationKind: value ? value as "apple-notes" | "notion" : null })} options={[{ value: "", label: "仅保存到 SQLite" }, { value: "apple-notes", label: "Apple Notes" }, { value: "notion", label: "Notion" }]} /></label>}{notesError && <ErrorBanner message={`无法读取 Notes 目标：${notesError}`} />}{settings && <><h3>Apple Notes</h3><NotesTargetPicker targets={notesTargets} account={settings.notesAccount ?? ""} folder={settings.notesFolder} onAccountChange={(value) => setSettings({ ...settings, notesAccount: value || null })} onFolderChange={(value) => setSettings({ ...settings, notesFolder: value })} /><h3>Notion</h3><span className={`health ${notionConnection?.connected ? "good" : "warn"}`}>{notionConnection?.connected ? "已连接" : "不可用"}</span>{notionConnection?.message && <ErrorBanner message={notionConnection.message} />}<label>父页面 URL 或 ID<input value={settings.notionParentPageId} placeholder="https://www.notion.so/..." onChange={(event) => setSettings({ ...settings, notionParentPageId: event.target.value })} /><small>Synapse 会通过 Codex App Server 调用已连接的 Notion MCP，在该页面下创建总结。</small></label></>}</section>
     <section className="settings-section"><div className="settings-title"><div className="setting-icon"><BookOpen size={18} /></div><div><h2>整理方案</h2><p>模板型保持 Markdown 骨架，系统提示词型提供完整规则。</p></div><button className="secondary push" onClick={() => { setConfirmingDelete(false); setEditing({ id: "", name: "", kind: "template", instructions: "", isDefault: false }); }}><Plus size={14} />新建</button></div><div className="profile-list">{profiles.map((profile) => <button key={profile.id} onClick={() => { setConfirmingDelete(false); setEditing(profile); }}><div><strong>{profile.name}</strong><span>{profile.kind === "template" ? "Markdown 模板" : "系统提示词"}</span></div>{profile.isDefault && <em>默认</em>}</button>)}</div></section>
     {editing && <div className="modal-backdrop" role="presentation"><div className="profile-modal" role="dialog" aria-modal="true" aria-label={editing.id ? "编辑整理方案" : "新建整理方案"}><div className="panel-head"><h2>{editing.id ? "编辑整理方案" : "新建整理方案"}</h2><button className="icon-button" aria-label="关闭" onClick={() => { setEditing(null); setConfirmingDelete(false); }}><X size={17} /></button></div><label>名称<input value={editing.name} onChange={(event) => setEditing({ ...editing, name: event.target.value })} /></label><label>类型<Select ariaLabel="类型" value={editing.kind} onChange={(kind) => setEditing({ ...editing, kind: kind as SummaryProfileView["kind"] })} options={[{ value: "template", label: "Markdown 模板" }, { value: "systemPrompt", label: "系统提示词" }]} /></label><label>内容<textarea className="profile-editor" value={editing.instructions} onChange={(event) => setEditing({ ...editing, instructions: event.target.value })} /></label><label className="check-line"><input type="checkbox" checked={editing.isDefault} onChange={(event) => setEditing({ ...editing, isDefault: event.target.checked })} />设为默认</label>{confirmingDelete && <ErrorBanner message={`再次点击“确认删除”将永久删除方案“${editing.name}”。`} />}<div className="modal-actions">{editing.id && editing.id !== "builtin-task-retrospective" && <button className="danger" onClick={deleteProfile}><Trash2 size={14} />{confirmingDelete ? "确认删除" : "删除"}</button>}<button className="primary" onClick={saveProfile}>保存方案</button></div></div></div>}
     {reviewingHookTrust && pendingHooks.length > 0 && <HookTrustDialog hooks={pendingHooks} busy={saving} onCancel={() => setReviewingHookTrust(false)} onConfirm={trustHooks} />}

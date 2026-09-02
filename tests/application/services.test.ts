@@ -7,10 +7,10 @@ import { SqliteCodexSessionRepository, SqliteCodexTurnRepository, SqliteHookEven
 import { SqliteUnitOfWork } from "@infrastructure/sqlite/unit-of-work";
 import { ArbitraryTurnSelectionService, DefaultSessionLifecycleService, NormalizedTurnSummaryContextService } from "@domain/services";
 import { HookBasedSessionAwarenessService } from "@application/session-services";
-import { DestinationAwareSummaryGenerationService, TransactionalSummaryDeletionService, VersionedSummaryFinalizationService } from "@application/summary-services";
+import { DestinationAwareSummaryGenerationService, OutboxSummaryPublicationService, TransactionalSummaryDeletionService, VersionedSummaryFinalizationService } from "@application/summary-services";
 import { CodexSessionAggregate } from "@domain/session";
-import { PublicationTarget, SourceRevision, SummaryDocumentAggregate, SummaryVersion, TurnSelection } from "@domain/summary";
-import { NotesOutboxWorker } from "@infrastructure/notes/outbox-worker";
+import { AppleNotesPublicationTarget, NotionPublicationTarget, SourceRevision, SummaryDocumentAggregate, SummaryVersion, TurnSelection } from "@domain/summary";
+import { PublicationOutboxWorker } from "@infrastructure/publication/outbox-worker";
 import { NodeContentHashService } from "@infrastructure/system";
 import type { Logger } from "@shared/logger";
 
@@ -71,7 +71,7 @@ describe("application services", () => {
       const sessions = new SqliteCodexSessionRepository(database); const turns = new SqliteCodexTurnRepository(database); const summaries = new SqliteSummaryDocumentRepository(database); const outbox = new SqliteOutboxRepository(database); const publications = new SqlitePublicationRepository(database);
       const session = CodexSessionAggregate.create("session", "thread", "/repo", "a"); session.startTurn({ turnId: "turn", promptContent: "prompt", at: "b" }); session.completeTurn({ turnId: "turn", assistantContent: "done", at: "c" });
       await sessions.save(session); await turns.saveMany(session.id, session.turns);
-      const document = SummaryDocumentAggregate.create({ id: "doc", sessionId: "session", profileId: "builtin-task-retrospective", selection: new TurnSelection(["turn"]), publicationTarget: new PublicationTarget(null, "Synapse"), createdAt: "d", updatedAt: "d" });
+      const document = SummaryDocumentAggregate.create({ id: "doc", sessionId: "session", profileId: "builtin-task-retrospective", selection: new TurnSelection(["turn"]), publicationTarget: new AppleNotesPublicationTarget(null, "Synapse"), createdAt: "d", updatedAt: "d" });
       document.addDraft(new SummaryVersion({ id: "draft", documentId: "doc", sequence: 0, kind: "agent-draft", generationMode: "new", baseVersionId: null, content: { title: "Title", abstract: "Abstract", bodyMarkdown: "Body", tags: [] }, sourceRevision: new SourceRevision("session", ["turn"], "hash"), model: null, createdAt: "e" }));
       await summaries.create(document);
       let id = 0;
@@ -80,7 +80,7 @@ describe("application services", () => {
       expect(final.isFinal).toBe(true);
       expect((await summaries.findById("doc"))?.snapshot.versions).toHaveLength(2);
       expect((await sessions.findById("session"))?.status).toBe("summarized");
-      expect(await outbox.listPending("notes-sync", 10)).toHaveLength(1);
+      expect(await outbox.listPending("publication-sync", 10)).toHaveLength(1);
     } finally { database.close(); }
   });
 
@@ -95,7 +95,7 @@ describe("application services", () => {
       const source = CodexSessionAggregate.create("source", "source-thread", "/project", "a");
       source.startTurn({ turnId: "source-turn", promptContent: "new work", at: "b" }); source.completeTurn({ turnId: "source-turn", assistantContent: "verified result", at: "c" });
       await sessions.save(owner); await sessions.save(source); await turns.saveMany(owner.id, owner.turns); await turns.saveMany(source.id, source.turns);
-      const target = new PublicationTarget(null, "Synapse");
+      const target = new AppleNotesPublicationTarget(null, "Synapse");
       const document = SummaryDocumentAggregate.create({ id: "doc", sessionId: owner.id, profileId: "builtin-task-retrospective", selection: new TurnSelection(["owner-turn"]), publicationTarget: target, createdAt: "d", updatedAt: "d" });
       const base = new SummaryVersion({ id: "base", documentId: "doc", sequence: 0, kind: "final", generationMode: "new", baseVersionId: null, content: { title: "Knowledge", abstract: "", bodyMarkdown: "# Knowledge\n\n## Existing\n\nKeep.", tags: [] }, sourceRevision: new SourceRevision(owner.id, ["owner-turn"], "base-hash"), model: null, createdAt: "e" });
       document.finalize(base, false); await summaries.create(document);
@@ -111,13 +111,13 @@ describe("application services", () => {
       expect(captured && "profile" in captured).toBe(false);
       const merged = await summaries.findById("doc");
       expect(merged?.currentVersion?.props).toMatchObject({ id: draft.versionId, generationMode: "merge", baseVersionId: "base" });
-      expect(await outbox.listPending("notes-sync", 10)).toHaveLength(0);
+      expect(await outbox.listPending("publication-sync", 10)).toHaveLength(0);
 
       const finalization = new VersionedSummaryFinalizationService(summaries, sessions, outbox, publications, unitOfWork, { now: () => "final-time" }, { next: () => `final-${++id}` });
       await finalization.finalize({ documentId: "doc", expectedVersionId: draft.versionId, content: draft.content });
       expect((await sessions.findById(source.id))?.status).toBe("summarized");
       expect((await summaries.findLatestBySessionId(source.id))?.id).toBe("doc");
-      expect(await outbox.listPending("notes-sync", 10)).toHaveLength(1);
+      expect(await outbox.listPending("publication-sync", 10)).toHaveLength(1);
     } finally { database.close(); }
   });
 
@@ -166,16 +166,16 @@ describe("application services", () => {
       document.finalize(new SummaryVersion({ id: "final", documentId: "doc", sequence: 1, kind: "final", generationMode: "new", baseVersionId: null, content: { title: "Title", abstract: "Abstract", bodyMarkdown: "Body", tags: [] }, sourceRevision: revision, model: null, createdAt: "f" }), false);
       await summaries.create(document);
       await jobs.save({ id: "job", documentId: "doc", sourceSessionId: "session", generationMode: "new", baseVersionId: null, status: "succeeded", error: null, coveredTurnIds: ["turn"], stageCoverage: [], createdAt: "e", updatedAt: "e" });
-      await outbox.add({ id: "message", kind: "notes-sync", aggregateId: "doc", payload: {}, createdAt: "e", processedAt: null, attempts: 0, lastError: null });
-      database.connection.prepare("INSERT INTO notes_exports(document_id,publisher,external_id,account,folder,version_id,status,error,updated_at) VALUES (?,?,?,?,?,?,?,?,?)")
-        .run("doc", "apple-notes", "note", null, "Synapse", "final", "published", null, "e");
+      await outbox.add({ id: "message", kind: "publication-sync", aggregateId: "doc", payload: {}, createdAt: "e", processedAt: null, attempts: 0, lastError: null });
+      database.connection.prepare("INSERT INTO publications(document_id,publisher,external_id,target_json,version_id,status,error,updated_at) VALUES (?,?,?,?,?,?,?,?)")
+        .run("doc", "apple-notes", "note", JSON.stringify({ kind: "apple-notes", account: null, folder: "Synapse" }), "final", "published", null, "e");
 
       const service = new TransactionalSummaryDeletionService(summaries, sessions, outbox, new SqliteUnitOfWork(database));
       await service.delete("doc");
 
       expect(await summaries.findById("doc")).toBeNull();
       expect((await sessions.findById("session"))?.snapshot).toMatchObject({ status: "ready", summarizedAt: null });
-      for (const table of ["summary_versions", "summary_jobs", "notes_exports", "summary_fts", "outbox"]) {
+      for (const table of ["summary_versions", "summary_jobs", "publications", "summary_fts", "outbox"]) {
         expect((database.connection.prepare(`SELECT COUNT(*) count FROM ${table}`).get() as { count: number }).count).toBe(0);
       }
       await expect(summaries.save(document)).rejects.toThrow("Summary document does not exist.");
@@ -208,13 +208,36 @@ describe("application services", () => {
     const { database } = await testDatabase();
     try {
       const outbox = new SqliteOutboxRepository(database);
-      await outbox.add({ id: "message", kind: "notes-sync", aggregateId: "doc", payload: {}, createdAt: "a", processedAt: null, attempts: 0, lastError: null });
+      await outbox.add({ id: "message", kind: "publication-sync", aggregateId: "doc", payload: {}, createdAt: "a", processedAt: null, attempts: 0, lastError: null });
       let attempts = 0;
-      const worker = new NotesOutboxWorker(outbox, { async publishCurrent() { attempts += 1; throw new Error("permission denied"); }, async retry() {} }, { now: () => "now" }, logger);
+      const worker = new PublicationOutboxWorker(outbox, { async publishCurrent() { attempts += 1; throw new Error("permission denied"); }, async retry() {} }, { now: () => "now" }, logger);
       await worker.runOnce(); await worker.runOnce();
       expect(attempts).toBe(1);
       const row = database.connection.prepare("SELECT attempts,last_error FROM outbox WHERE id = ?").get("message") as { attempts: number; last_error: string };
       expect(row).toEqual({ attempts: 1, last_error: "permission denied" });
+    } finally { database.close(); }
+  });
+
+  it("routes a Notion target to the Notion publisher and persists its page id", async () => {
+    const { database } = await testDatabase();
+    try {
+      const sessions = new SqliteCodexSessionRepository(database); const turns = new SqliteCodexTurnRepository(database);
+      const summaries = new SqliteSummaryDocumentRepository(database); const publications = new SqlitePublicationRepository(database);
+      const session = CodexSessionAggregate.create("session", "thread", "/repo", "a");
+      session.startTurn({ turnId: "turn", promptContent: "prompt", at: "a" }); session.completeTurn({ turnId: "turn", assistantContent: "done", at: "b" });
+      await sessions.save(session); await turns.saveMany(session.id, session.turns);
+      const target = new NotionPublicationTarget("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+      const document = SummaryDocumentAggregate.create({ id: "doc", sessionId: session.id, profileId: "builtin-task-retrospective", selection: new TurnSelection(["turn"]), publicationTarget: target, createdAt: "b", updatedAt: "b" });
+      document.finalize(new SummaryVersion({ id: "final", documentId: document.id, sequence: 0, kind: "final", generationMode: "new", baseVersionId: null, content: { title: "Title", abstract: "", bodyMarkdown: "Body", tags: [] }, sourceRevision: new SourceRevision(session.id, ["turn"], "hash"), model: null, createdAt: "c" }), true);
+      await summaries.create(document);
+      let published = false;
+      const publisher = { kind: "notion" as const, async publish() { published = true; return { externalId: "notion-page", updated: false }; } };
+      const service = new OutboxSummaryPublicationService(summaries, publications, { get(kind) { expect(kind).toBe("notion"); return publisher; } }, { now: () => "d" });
+
+      await service.publishCurrent(document.id);
+
+      expect(published).toBe(true);
+      expect(await publications.find(document.id)).toMatchObject({ publisher: "notion", externalId: "notion-page", target: { kind: "notion" } });
     } finally { database.close(); }
   });
 

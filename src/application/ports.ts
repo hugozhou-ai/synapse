@@ -3,6 +3,7 @@ import type { CodexTurn } from "@domain/session";
 import type { DomainEvent } from "@domain/shared";
 import type {
   PublicationTarget,
+  PublisherKind,
   SummaryDocumentAggregate,
   SummaryContent,
   SummaryProfile,
@@ -41,7 +42,7 @@ export interface SummaryJobRepository {
 
 export interface PublicationRecord {
   readonly documentId: string;
-  readonly publisher: "apple-notes";
+  readonly publisher: PublisherKind;
   readonly externalId: string | null;
   readonly target: PublicationTarget;
   readonly versionId: string;
@@ -51,13 +52,13 @@ export interface PublicationRecord {
 }
 
 export interface PublicationRepository {
-  find(documentId: string, publisher: "apple-notes"): Promise<PublicationRecord | null>;
+  find(documentId: string, publisher?: PublisherKind): Promise<PublicationRecord | null>;
   save(record: PublicationRecord): Promise<void>;
 }
 
 export interface OutboxMessage {
   readonly id: string;
-  readonly kind: "domain-event" | "notes-sync";
+  readonly kind: "domain-event" | "publication-sync";
   readonly aggregateId: string;
   readonly payload: unknown;
   readonly createdAt: string;
@@ -118,12 +119,20 @@ export interface PublicationReceipt {
 }
 
 export interface SummaryPublisher {
-  readonly kind: "apple-notes";
+  readonly kind: PublisherKind;
   publish(request: PublishSummaryRequest): Promise<PublicationReceipt>;
+}
+
+export interface PublicationPublisherRegistry {
+  get(kind: PublisherKind): SummaryPublisher;
 }
 
 export interface NotesTargetGateway {
   listTargets(): Promise<NotesTargetsView>;
+}
+
+export interface NotionConnectionGateway {
+  inspectConnection(): Promise<import("./contracts").NotionConnectionView>;
 }
 
 export interface EventPublisher {
@@ -154,6 +163,7 @@ export interface SummarySearchItem {
   readonly profileId: string;
   readonly versionKind: string;
   readonly notesLinked: boolean;
+  readonly notionLinked: boolean;
   readonly updatedAt: string;
 }
 
@@ -211,9 +221,10 @@ export interface HookTrustGateway {
 export interface ApplicationSettings {
   readonly codexBinaryPath: string | null;
   readonly summaryModel: string | null;
-  readonly syncNotesByDefault: boolean;
   readonly notesAccount: string | null;
   readonly notesFolder: string;
+  readonly defaultPublicationKind: PublisherKind | null;
+  readonly notionParentPageId: string;
   readonly widgetVisible: boolean;
   readonly widgetPositions: Readonly<Record<string, { x: number; y: number }>>;
   readonly widgetDisplayId: string | null;

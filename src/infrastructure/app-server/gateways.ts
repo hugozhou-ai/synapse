@@ -1,7 +1,9 @@
 import { mkdir } from "node:fs/promises";
-import type { AgentModel, HookTrustGateway, HookTrustState, SummaryAgentGateway, SummaryAgentRequest } from "@application/ports";
+import type { AgentModel, HookTrustGateway, HookTrustState, NotionConnectionGateway, PublicationReceipt, PublishSummaryRequest, SummaryAgentGateway, SummaryAgentRequest, SummaryPublisher } from "@application/ports";
+import type { NotionConnectionView } from "@application/contracts";
 import type { GeneratedSummary } from "@domain/conversation";
 import { DomainError } from "@domain/shared";
+import type { Logger } from "@shared/logger";
 import { z } from "zod";
 import type { CodexAppServerClient, CodexNotification } from "./client";
 
@@ -224,4 +226,179 @@ function validateTrustCandidate(hook: ListedHook): void {
 function worstTrust(values: readonly HookTrustState["status"][]): HookTrustState["status"] {
   for (const value of ["modified", "untrusted", "unknown", "trusted", "managed"] as const) if (values.includes(value)) return value;
   return "unknown";
+}
+
+interface AppServerMcpToolCallResponse {
+  readonly content?: readonly unknown[];
+  readonly structuredContent?: unknown;
+  readonly isError?: boolean;
+}
+
+interface AppServerMcpStatusResponse {
+  readonly data?: readonly {
+    readonly name?: unknown;
+    readonly tools?: Readonly<Record<string, unknown>>;
+  }[];
+}
+
+const NOTION_SERVER = "codex_apps";
+const NOTION_CREATE_TOOL = "notion.notion-create-pages";
+const NOTION_UPDATE_TOOL = "notion.notion-update-page";
+
+export class CodexAppServerNotionPublisher implements SummaryPublisher, NotionConnectionGateway {
+  readonly kind = "notion" as const;
+
+  constructor(
+    private readonly client: CodexAppServerClient,
+    private readonly runtimeDirectory: string,
+    private readonly logger: Logger,
+  ) {}
+
+  async inspectConnection(): Promise<NotionConnectionView> {
+    const threadId = await this.startThread();
+    try {
+      const tools = await this.notionTools(threadId);
+      const available = tools.has(NOTION_CREATE_TOOL) && tools.has(NOTION_UPDATE_TOOL);
+      return {
+        available,
+        connected: available,
+        message: available ? null : "Codex 中的 Notion App 未连接，或当前连接不提供页面写入工具。",
+      };
+    } finally {
+      await this.client.request("thread/unsubscribe", { threadId }).catch(() => undefined);
+    }
+  }
+
+  async publish(request: PublishSummaryRequest): Promise<PublicationReceipt> {
+    if (request.target.kind !== "notion") throw new Error("Notion publisher received an incompatible target.");
+    await mkdir(this.runtimeDirectory, { recursive: true, mode: 0o700 });
+    const threadId = await this.startThread();
+    try {
+      const tools = await this.notionTools(threadId);
+      const required = request.existingExternalId ? [NOTION_UPDATE_TOOL] : [NOTION_CREATE_TOOL];
+      for (const tool of required) {
+        if (!tools.has(tool)) throw new DomainError("NOTION_MCP_UNAVAILABLE", `Codex 中的 Notion App 未提供 ${tool}，请在 Codex 设置中连接并启用 Notion。`);
+      }
+
+      let externalId = request.existingExternalId;
+      if (externalId) {
+        await this.call(threadId, NOTION_UPDATE_TOOL, {
+          page_id: externalId,
+          command: "replace_content",
+          new_str: request.version.props.content.bodyMarkdown,
+        });
+        await this.call(threadId, NOTION_UPDATE_TOOL, {
+          page_id: externalId,
+          command: "update_properties",
+          properties: { title: request.version.props.content.title },
+        });
+      } else {
+        const response = await this.call(threadId, NOTION_CREATE_TOOL, {
+          parent: { type: "page_id", page_id: normalizeNotionPageId(request.target.parentPageId) },
+          pages: [{
+            properties: { title: request.version.props.content.title },
+            content: request.version.props.content.bodyMarkdown,
+          }],
+        });
+        externalId = extractNotionPageId(response);
+      }
+
+      const details = { publisher: this.kind, documentId: request.documentId, versionId: request.version.props.id, updated: Boolean(request.existingExternalId), externalId };
+      this.logger.info("[synapse:publication]", "publish-succeeded", { details: JSON.stringify(details) });
+      return { externalId, updated: Boolean(request.existingExternalId) };
+    } catch (error) {
+      const details = { publisher: this.kind, documentId: request.documentId, versionId: request.version.props.id, message: error instanceof Error ? error.message : String(error) };
+      this.logger.error("[synapse:publication]", "publish-failed", { details: JSON.stringify(details) });
+      throw error;
+    } finally {
+      await this.client.request("thread/unsubscribe", { threadId }).catch(() => undefined);
+    }
+  }
+
+  private async startThread(): Promise<string> {
+    await mkdir(this.runtimeDirectory, { recursive: true, mode: 0o700 });
+    const started = await this.client.request<{ thread: { id: string } }>("thread/start", {
+      cwd: this.runtimeDirectory,
+      approvalPolicy: "never",
+      sandbox: "read-only",
+      ephemeral: true,
+      baseInstructions: "Synapse publication transport context. No model turn is started for this thread.",
+    });
+    return started.thread.id;
+  }
+
+  private async notionTools(threadId: string): Promise<ReadonlySet<string>> {
+    const response = await this.client.request<AppServerMcpStatusResponse>("mcpServerStatus/list", {
+      threadId,
+      detail: "toolsAndAuthOnly",
+      limit: 100,
+    });
+    const server = response.data?.find((item) => item.name === NOTION_SERVER);
+    return new Set(Object.keys(server?.tools ?? {}).filter((tool) => tool.startsWith("notion.")));
+  }
+
+  private async call(threadId: string, tool: string, args: unknown): Promise<AppServerMcpToolCallResponse> {
+    const releaseAuthorization = this.client.authorizeMcp?.(threadId, NOTION_SERVER) ?? (() => undefined);
+    try {
+      const response = await this.client.request<AppServerMcpToolCallResponse>("mcpServer/tool/call", {
+        threadId,
+        server: NOTION_SERVER,
+        tool,
+        arguments: args,
+      });
+      if (response.isError) throw new DomainError("NOTION_MCP_CALL_FAILED", notionErrorMessage(response));
+      return response;
+    } finally {
+      releaseAuthorization();
+    }
+  }
+}
+
+export function normalizeNotionPageId(value: string): string {
+  const trimmed = value.trim();
+  const compactUuid = trimmed.match(/[0-9a-f]{32}/i)?.[0];
+  const dashedUuid = trimmed.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)?.[0];
+  const id = dashedUuid ?? compactUuid;
+  if (!id) throw new DomainError("INVALID_NOTION_PARENT", "请输入有效的 Notion 页面 URL 或页面 ID。");
+  return id.replaceAll("-", "");
+}
+
+function extractNotionPageId(response: AppServerMcpToolCallResponse): string {
+  const candidates = [response.structuredContent, ...(response.content ?? [])];
+  for (const candidate of candidates) {
+    const id = findNotionPageId(candidate);
+    if (id) return id;
+  }
+  throw new DomainError("NOTION_MCP_INVALID_RESPONSE", "Notion 已执行创建，但没有返回可用于后续更新的页面 ID。");
+}
+
+function findNotionPageId(value: unknown): string | null {
+  if (typeof value === "string") {
+    try {
+      const nested = findNotionPageId(JSON.parse(value));
+      if (nested) return nested;
+    } catch {}
+    const match = value.match(/[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}/i);
+    return match ? match[0].replaceAll("-", "") : null;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) { const id = findNotionPageId(item); if (id) return id; }
+  }
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    for (const key of ["page_id", "pageId", "id", "url", "text"]) {
+      const id = findNotionPageId(record[key]);
+      if (id) return id;
+    }
+    for (const nested of Object.values(record)) { const id = findNotionPageId(nested); if (id) return id; }
+  }
+  return null;
+}
+
+function notionErrorMessage(response: AppServerMcpToolCallResponse): string {
+  const text = response.content?.map((item) => {
+    if (item && typeof item === "object" && "text" in item) return String((item as { text: unknown }).text);
+    return "";
+  }).filter(Boolean).join("\n");
+  return text || "Notion MCP 调用失败。";
 }

@@ -6,7 +6,14 @@ export interface SummaryContentView {
 }
 
 export type SummaryProfileKindView = "template" | "systemPrompt";
-export interface PublicationTargetInput { readonly account: string | null; readonly folder: string; }
+export type PublicationTargetInput = {
+  readonly kind: "apple-notes";
+  readonly account: string | null;
+  readonly folder: string;
+} | {
+  readonly kind: "notion";
+  readonly parentPageId: string;
+};
 
 export interface SessionTransitionResult {
   readonly sessionId: string;
@@ -67,6 +74,12 @@ export interface NotesTargetsView {
   }[];
 }
 
+export interface NotionConnectionView {
+  readonly available: boolean;
+  readonly connected: boolean;
+  readonly message: string | null;
+}
+
 export interface WidgetSessionView {
   readonly id: string;
   readonly threadId: string;
@@ -100,6 +113,8 @@ export interface SummaryDetailView {
   readonly reference: null | { readonly uri: string; readonly text: string };
   readonly publicationStatus: string;
   readonly notesLinked: boolean;
+  readonly notionLinked: boolean;
+  readonly publisher: "apple-notes" | "notion" | null;
   readonly currentVersion: null | {
     readonly id: string;
     readonly kind: string;

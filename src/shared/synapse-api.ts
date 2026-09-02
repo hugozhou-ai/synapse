@@ -1,5 +1,5 @@
 import type { AgentModel, ApplicationSettings, ApplicationSettingsUpdate, AppServerRuntimeStatus, CodexPluginInstallationStatus, HookInstallationStatus, SummarySearchCriteria, SummarySearchResult } from "@application/ports";
-import type { ConversationTurnsView, FinalizeSummaryCommand, FinalizedSummaryView, GenerateSummaryCommand, NotesTargetsView, RegenerateSummaryCommand, RendererErrorReport, SaveProfileCommand, SummaryDetailView, SummaryDraft, SummaryProfileView, UpdateDraftCommand, WidgetSessionView } from "@application/contracts";
+import type { ConversationTurnsView, FinalizeSummaryCommand, FinalizedSummaryView, GenerateSummaryCommand, NotesTargetsView, NotionConnectionView, RegenerateSummaryCommand, RendererErrorReport, SaveProfileCommand, SummaryDetailView, SummaryDraft, SummaryProfileView, UpdateDraftCommand, WidgetSessionView } from "@application/contracts";
 import type { WidgetBounds } from "./widget-layout";
 
 export interface SynapseApi {
@@ -15,9 +15,9 @@ export interface SynapseApi {
     finalize(command: FinalizeSummaryCommand): Promise<FinalizedSummaryView>;
     search(query: SummarySearchCriteria): Promise<SummarySearchResult>;
     get(documentId: string): Promise<SummaryDetailView>;
-    delete(documentId: string): Promise<void>;
     copyReference(documentId: string, versionId: string): Promise<{ readonly uri: string; readonly text: string }>;
-    retryNotes(documentId: string): Promise<void>;
+    delete(documentId: string): Promise<void>;
+    retryPublication(documentId: string): Promise<void>;
   };
   profiles: {
     list(): Promise<readonly SummaryProfileView[]>;
@@ -29,6 +29,7 @@ export interface SynapseApi {
     update(command: ApplicationSettingsUpdate): Promise<ApplicationSettings>;
     models(): Promise<readonly AgentModel[]>;
     notesTargets(): Promise<NotesTargetsView>;
+    notionConnection(): Promise<NotionConnectionView>;
     runtime(): Promise<AppServerRuntimeStatus>;
   };
   hooks: {

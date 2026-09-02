@@ -15,8 +15,9 @@ import { UnixSocketHookEventReceiver, type HookEventReceiver } from "@infrastruc
 import { FileSystemHookRelayInstaller } from "@infrastructure/hooks/relay-installer";
 import { FileSystemHookEventSpool } from "@infrastructure/hooks/spool";
 import { JsonFileLogger } from "@infrastructure/logging/json-file-logger";
-import { NotesOutboxWorker } from "@infrastructure/notes/outbox-worker";
 import { AppleNotesSummaryPublisher } from "@infrastructure/notes/publisher";
+import { PublicationOutboxWorker } from "@infrastructure/publication/outbox-worker";
+import { FixedPublicationPublisherRegistry } from "@infrastructure/publication/publisher-registry";
 import { NodeSqliteSynapseDatabase } from "@infrastructure/sqlite/database";
 import { SqliteCodexSessionRepository, SqliteCodexTurnRepository, SqliteHookEventRepository, SqliteOutboxRepository, SqlitePublicationRepository, SqliteSettingsRepository, SqliteSummaryDocumentRepository, SqliteSummaryJobRepository, SqliteSummaryProfileRepository } from "@infrastructure/sqlite/repositories";
 import { SqliteUnitOfWork } from "@infrastructure/sqlite/unit-of-work";
@@ -41,7 +42,7 @@ export class ElectronApplicationContainer {
   readonly summaryReferences!: SummaryReferenceService;
   readonly codexPlugin!: CodexPluginManagement;
   readonly hookReceiver!: HookEventReceiver;
-  readonly notesWorker!: NotesOutboxWorker;
+  readonly publicationWorker!: PublicationOutboxWorker;
   readonly logger!: Logger;
 
   private constructor(
@@ -82,7 +83,7 @@ export class ElectronApplicationContainer {
     const finalization = new VersionedSummaryFinalizationService(summaries, sessions, outbox, publications, unitOfWork, clock, ids);
     const notesScript = resourcePath(app, "apple-notes-publisher.jxa");
     const notes = new AppleNotesSummaryPublisher(notesScript, logger);
-    const publication = new OutboxSummaryPublicationService(summaries, publications, notes, clock, outbox);
+    const publication = new OutboxSummaryPublicationService(summaries, publications, new FixedPublicationPublisherRegistry([notes, appServer]), clock, outbox);
 
     const codexDirectory = process.env.CODEX_HOME || join(homedir(), ".codex");
     const configStore = new JsonCodexHookConfigStore(codexDirectory, supportDirectory, logger);
@@ -94,7 +95,7 @@ export class ElectronApplicationContainer {
       new FileSystemHookEventSpool(join(supportDirectory, "spool")), logger, onSessionsChanged,
       appServerAgentRuntimeDirectory(supportDirectory),
     );
-    const notesWorker = new NotesOutboxWorker(outbox, publication, clock, logger);
+    const publicationWorker = new PublicationOutboxWorker(outbox, publication, clock, logger);
 
     const services = {
       sessionAwareness: awareness,
@@ -105,20 +106,20 @@ export class ElectronApplicationContainer {
       summaryFinalization: finalization,
       summaryPublication: publication,
       profiles: new RepositoryProfileApplicationService(profiles, ids),
-      settings: new PersistentSettingsApplicationService(settingsRepository, appServer, appServer, notes, unitOfWork),
+      settings: new PersistentSettingsApplicationService(settingsRepository, appServer, appServer, notes, appServer, unitOfWork),
       hookManagement,
       exports: new SystemExportApplicationService(summaries, new ElectronExportGateway(databasePath)),
       summaryReferences: new RepositorySummaryReferenceService(summaries, new ElectronTextClipboardGateway()),
       codexPlugin: new FileSystemCodexPluginManagement(resourcePath(app, "plugins/synapse-reference"), homedir(), settingsValue.codexBinaryPath, logger),
       hookReceiver: receiver,
-      notesWorker,
+      publicationWorker,
       logger,
     };
     return new ElectronApplicationContainer(services as Omit<ElectronApplicationContainer, "close">, database, appServer);
   }
 
   async close(): Promise<void> {
-    this.notesWorker.stop(); await this.hookReceiver.stop(); await this.appServer.close(); this.database.close();
+    this.publicationWorker.stop(); await this.hookReceiver.stop(); await this.appServer.close(); this.database.close();
   }
 }
 

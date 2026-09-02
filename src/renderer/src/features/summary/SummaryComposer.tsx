@@ -17,10 +17,11 @@ export function SummaryComposer({ sessionId, onClose }: { sessionId: string; onC
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [destinationMode, setDestinationMode] = useState<"new" | "existing">("new");
   const [profileId, setProfileId] = useState("");
-  const [syncNotes, setSyncNotes] = useState(false);
+  const [publicationKind, setPublicationKind] = useState<"apple-notes" | "notion" | null>(null);
   const [notesAccount, setNotesAccount] = useState("");
   const [notesFolder, setNotesFolder] = useState("Synapse");
   const [notesTargets, setNotesTargets] = useState<NotesTargetsView | null>(null);
+  const [notionParentPageId, setNotionParentPageId] = useState("");
   const [targetQuery, setTargetQuery] = useState("");
   const [targetItems, setTargetItems] = useState<readonly SummarySearchItem[]>([]);
   const [targetDocumentId, setTargetDocumentId] = useState("");
@@ -39,15 +40,16 @@ export function SummaryComposer({ sessionId, onClose }: { sessionId: string; onC
     void Promise.all([window.synapse.profiles.list(), window.synapse.settings.read()]).then(([nextProfiles, nextSettings]) => {
       setProfiles(nextProfiles); setSettings(nextSettings);
       setProfileId(nextProfiles.find((profile) => profile.isDefault)?.id ?? nextProfiles[0]?.id ?? "");
-      setSyncNotes(nextSettings.syncNotesByDefault);
+      setPublicationKind(nextSettings.defaultPublicationKind);
       setNotesAccount(nextSettings.notesAccount ?? ""); setNotesFolder(nextSettings.notesFolder);
+      setNotionParentPageId(nextSettings.notionParentPageId);
     }).catch((reason) => setLoadError(messageOf(reason)));
   }, [loadConversation]);
 
   useEffect(() => {
-    if (destinationMode !== "new" || !syncNotes || notesTargets) return;
+    if (destinationMode !== "new" || publicationKind !== "apple-notes" || notesTargets) return;
     void window.synapse.settings.notesTargets().then(setNotesTargets).catch((reason) => setLoadError(`无法读取 Apple Notes 目标：${messageOf(reason)}`));
-  }, [destinationMode, notesTargets, syncNotes]);
+  }, [destinationMode, notesTargets, publicationKind]);
 
   useEffect(() => {
     if (destinationMode !== "existing") return;
@@ -70,15 +72,21 @@ export function SummaryComposer({ sessionId, onClose }: { sessionId: string; onC
 
   const turns = conversation?.turns ?? [];
   const destinationInvalid = destinationMode === "new" ? !profileId : !targetDocumentId;
-  const notesInvalid = destinationMode === "new" && syncNotes && !notesFolder.trim();
+  const publicationInvalid = destinationMode === "new" && (
+    publicationKind === "apple-notes" ? !notesFolder.trim() : publicationKind === "notion" ? !notionParentPageId.trim() : false
+  );
   const generate = async () => {
-    if (selected.size === 0 || !settings || destinationInvalid || notesInvalid) return;
+    if (selected.size === 0 || !settings || destinationInvalid || publicationInvalid) return;
     draft.beginGeneration();
     try {
       const result = await window.synapse.summaries.generate({
         sessionId, selectedTurnIds: [...selected], model: settings.summaryModel,
         destination: destinationMode === "new"
-          ? { kind: "new", profileId, publicationTarget: syncNotes ? { account: notesAccount || null, folder: notesFolder } : null }
+          ? { kind: "new", profileId, publicationTarget: publicationKind === "apple-notes"
+            ? { kind: "apple-notes", account: notesAccount || null, folder: notesFolder }
+            : publicationKind === "notion"
+              ? { kind: "notion", parentPageId: notionParentPageId }
+              : null }
           : { kind: "existing", targetDocumentId },
       });
       draft.acceptGenerated(result);
@@ -100,11 +108,12 @@ export function SummaryComposer({ sessionId, onClose }: { sessionId: string; onC
         {destinationMode === "new" ? <>
           <label>整理方案<Select ariaLabel="整理方案" value={profileId} onChange={setProfileId} options={profiles.map((profile) => ({ value: profile.id, label: profile.name }))} /></label>
           <div className="profile-preview"><span>{profiles.find((profile) => profile.id === profileId)?.kind === "template" ? "Markdown 模板" : "系统提示词"}</span><p>{profiles.find((profile) => profile.id === profileId)?.instructions.slice(0, 240)}</p></div>
-          <label className="toggle-row"><input type="checkbox" checked={syncNotes} onChange={(event) => setSyncNotes(event.target.checked)} /><span className="toggle" /><div><strong>同步到 Apple Notes</strong><small>{notesFolder || "未选择文件夹"} · 仅 final 后执行</small></div></label>
-          {syncNotes && <NotesTargetPicker targets={notesTargets} account={notesAccount} folder={notesFolder} onAccountChange={setNotesAccount} onFolderChange={setNotesFolder} />}
+          <label>外部发布<Select ariaLabel="外部发布" value={publicationKind ?? ""} onChange={(value) => setPublicationKind(value ? value as "apple-notes" | "notion" : null)} options={[{ value: "", label: "仅保存到 SQLite" }, { value: "apple-notes", label: "Apple Notes" }, { value: "notion", label: "Notion" }]} /></label>
+          {publicationKind === "apple-notes" && <NotesTargetPicker targets={notesTargets} account={notesAccount} folder={notesFolder} onAccountChange={setNotesAccount} onFolderChange={setNotesFolder} />}
+          {publicationKind === "notion" && <label>Notion 父页面<input value={notionParentPageId} placeholder="页面 URL 或页面 ID" onChange={(event) => setNotionParentPageId(event.target.value)} /><small>仅在 final 后创建页面；后续 final 会更新同一页面。</small></label>}
         </> : <ExistingTargetPicker query={targetQuery} onQueryChange={setTargetQuery} items={targetItems} selectedId={targetDocumentId} onSelect={setTargetDocumentId} detail={targetDetail} />}
         <div className="source-count"><strong>{selected.size}</strong><span>个 turns 将作为事实来源</span></div>
-        <button className="primary wide" disabled={busy || !conversation || selected.size === 0 || destinationInvalid || notesInvalid} onClick={generate}>{draft.state.phase === "generating" ? <LoaderCircle className="spin" size={17} /> : <Sparkles size={17} />}{destinationMode === "existing" ? "整理到已有内容" : "总结"}</button>
+        <button className="primary wide" disabled={busy || !conversation || selected.size === 0 || destinationInvalid || publicationInvalid} onClick={generate}>{draft.state.phase === "generating" ? <LoaderCircle className="spin" size={17} /> : <Sparkles size={17} />}{destinationMode === "existing" ? "整理到已有内容" : "总结"}</button>
       </aside>
     </div> : <DraftWorkspace state={draft.state} busy={busy} finalized={finalized} onEdit={draft.edit} onPreview={draft.setPreview} onSave={() => void draft.save()} onFinalize={() => void draft.finalize()} />}
   </div>;
@@ -121,9 +130,15 @@ function ExistingTargetPicker({ query, onQueryChange, items, selectedId, onSelec
   return <div className="existing-target-picker">
     <p className="target-guidance">将新事实融入 SQLite 中的完整已有内容；该模式不使用整理方案。</p>
     <div className="target-search"><Search size={14} /><input aria-label="搜索已有内容" placeholder="搜索标题、正文、标签或项目…" value={query} onChange={(event) => onQueryChange(event.target.value)} /></div>
-    <div className="target-results">{items.map((item) => <button key={item.documentId} className={selectedId === item.documentId ? "active" : ""} onClick={() => onSelect(item.documentId)}><strong>{item.title}</strong><span>{shortPath(item.cwd)} · {item.versionKind} · {item.notesLinked ? "已绑定 Notes" : "仅本地"}</span><small>{item.abstract}</small></button>)}{items.length === 0 && <span className="target-empty">没有匹配的已有内容</span>}</div>
-    {detail?.currentVersion && <div className="target-preview"><div><strong>目标预览</strong><span>{detail.notesLinked ? "final 后自动更新原便签" : "无 Notes 绑定，只更新本地"}</span></div><article><h3>{detail.currentVersion.content.title}</h3><ReactMarkdown>{detail.currentVersion.content.bodyMarkdown}</ReactMarkdown></article></div>}
+    <div className="target-results">{items.map((item) => <button key={item.documentId} className={selectedId === item.documentId ? "active" : ""} onClick={() => onSelect(item.documentId)}><strong>{item.title}</strong><span>{shortPath(item.cwd)} · {item.versionKind} · {publicationLabel(item.notesLinked, item.notionLinked)}</span><small>{item.abstract}</small></button>)}{items.length === 0 && <span className="target-empty">没有匹配的已有内容</span>}</div>
+    {detail?.currentVersion && <div className="target-preview"><div><strong>目标预览</strong><span>{detail.publisher ? `final 后自动更新${detail.publisher === "notion" ? " Notion 页面" : "原便签"}` : "无外部绑定，只更新本地"}</span></div><article><h3>{detail.currentVersion.content.title}</h3><ReactMarkdown>{detail.currentVersion.content.bodyMarkdown}</ReactMarkdown></article></div>}
   </div>;
+}
+
+function publicationLabel(notesLinked: boolean, notionLinked: boolean): string {
+  if (notesLinked) return "已绑定 Notes";
+  if (notionLinked) return "已绑定 Notion";
+  return "仅本地";
 }
 
 function DraftWorkspace({ state, busy, finalized, onEdit, onPreview, onSave, onFinalize }: {
