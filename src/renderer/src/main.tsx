@@ -4,9 +4,11 @@ import ReactDOM from "react-dom/client";
 import { App } from "./App";
 import { RendererErrorBoundary } from "./components/RendererErrorBoundary";
 import { resolveRendererSurface } from "./lib/renderer-surface";
+import { applyTheme, readStoredTheme, ThemeProvider } from "./theme";
 import "./styles.css";
 
 document.documentElement.dataset.surface = resolveRendererSurface(location.hash);
+applyTheme(readStoredTheme());
 
 window.addEventListener("error", (event) => {
   void window.synapse.diagnostics.reportRendererError({
@@ -20,4 +22,4 @@ window.addEventListener("unhandledrejection", (event) => {
   }).catch((reportError) => console.error(`[synapse:renderer] ${JSON.stringify({ message: "error-report-failed", reason: reportError instanceof Error ? reportError.message : String(reportError) })}`));
 });
 
-ReactDOM.createRoot(document.getElementById("root")!).render(<React.StrictMode><RendererErrorBoundary><App /></RendererErrorBoundary></React.StrictMode>);
+ReactDOM.createRoot(document.getElementById("root")!).render(<React.StrictMode><RendererErrorBoundary><ThemeProvider><App /></ThemeProvider></RendererErrorBoundary></React.StrictMode>);

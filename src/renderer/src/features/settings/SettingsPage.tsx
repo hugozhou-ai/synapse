@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
-import { BookOpen, Code2, NotebookPen, PackageCheck, Plus, ShieldCheck, Sparkles, Trash2, X } from "lucide-react";
+import { BookOpen, Check, Code2, NotebookPen, PackageCheck, Palette, Plus, ShieldCheck, Sparkles, Trash2, X } from "lucide-react";
 import type { AgentModel, ApplicationSettings, AppServerRuntimeStatus, CodexPluginInstallationStatus, HookInstallationStatus } from "@application/ports";
 import type { NotesTargetsView, NotionConnectionView, SummaryProfileView } from "@application/contracts";
 import { ErrorBanner, InfoBanner, PageHeader } from "../../components/common";
 import { NotesTargetPicker } from "../../components/NotesTargetPicker";
 import { Select } from "../../components/Select";
 import { messageOf, shortPath } from "../../lib/format";
+import { useTheme, visualThemes } from "../../theme";
 import { HookTrustDialog } from "./HookTrustDialog";
 
 export function SettingsPage() {
+  const { theme, setTheme } = useTheme();
   const [settings, setSettings] = useState<ApplicationSettings | null>(null);
   const [hooks, setHooks] = useState<HookInstallationStatus | null>(null);
   const [plugin, setPlugin] = useState<CodexPluginInstallationStatus | null>(null);
@@ -67,6 +69,16 @@ export function SettingsPage() {
   return <div className="page settings-page">
     <PageHeader eyebrow="CONFIGURATION" title="设置" description="外部系统均通过基础设施适配器连接；修改 Codex binary 后请重启 Synapse 以重新握手。" actions={<button className="primary" disabled={saving} onClick={save}>保存设置</button>} />
     {error && <ErrorBanner message={error} />}
+    <section className="settings-section appearance-section">
+      <div className="settings-title"><div className="setting-icon"><Palette size={18} /></div><div><h2>外观</h2><p>主题会立即应用到工作区与状态挂件，并在重启后保留。</p></div></div>
+      <div className="theme-options" role="radiogroup" aria-label="界面主题">
+        {visualThemes.map((option) => <button className={`theme-option ${theme === option.id ? "active" : ""}`} key={option.id} role="radio" aria-checked={theme === option.id} onClick={() => setTheme(option.id)}>
+          <span className={`theme-preview ${option.id}`} aria-hidden="true"><i /><i /><i /><b /></span>
+          <span className="theme-option-copy"><strong>{option.name}</strong><small>{option.description}</small></span>
+          <span className="theme-check" aria-hidden="true">{theme === option.id && <Check size={14} />}</span>
+        </button>)}
+      </div>
+    </section>
     {hooks?.onboardingRequired && <section className="hook-onboarding" aria-labelledby="hook-onboarding-title"><div><span className="eyebrow">FIRST-TIME SETUP</span><h2 id="hook-onboarding-title">连接 Codex，开始感知任务</h2><p>Synapse 需要安装三个低噪声 Hook 才能收到任务开始、prompt 提交和结束事件。安装会保留你现有的 Hook 配置并创建备份。</p></div><div className="onboarding-actions"><button className="ghost" disabled={saving} onClick={dismissHookOnboarding}>暂不设置</button><button className="primary" disabled={saving} onClick={() => hookAction(true)}><Plus size={14} />安装 Hook</button></div></section>}
     <section className="settings-section"><div className="settings-title"><div className="setting-icon"><Code2 size={18} /></div><div><h2>Codex App Server</h2><p>用于按需运行总结 agent，以及读取模型与 Hook 状态。</p></div><span className={`health ${runtime?.available ? "good" : "warn"}`}>{runtimeLabel}</span></div><div className="runtime-grid"><span><small>实际 binary</small><code>{runtime?.binaryPath ?? "—"}</code></span><span><small>版本</small><code>{runtime?.version ?? "—"}</code></span><span><small>认证</small><code>{runtime?.authentication ?? "unknown"}</code></span></div>{runtime?.error && <ErrorBanner message={runtime.error} />}<div className="settings-fields"><label>Codex binary 路径<input value={settings?.codexBinaryPath ?? ""} placeholder="自动发现" onChange={(event) => settings && setSettings({ ...settings, codexBinaryPath: event.target.value || null })} /></label><label>总结模型<Select ariaLabel="总结模型" value={settings?.summaryModel ?? ""} disabled={runtime?.state === "initializing"} onChange={(summaryModel) => settings && setSettings({ ...settings, summaryModel: summaryModel || null })} options={[{ value: "", label: "使用 Codex 默认模型" }, ...(settings?.summaryModel && !models.some((model) => model.id === settings.summaryModel) ? [{ value: settings.summaryModel, label: settings.summaryModel }] : []), ...models.map((model) => ({ value: model.id, label: `${model.displayName}${model.isDefault ? "（默认）" : ""}` }))]} /></label></div></section>
     <section className="settings-section">

@@ -15,6 +15,8 @@ describe("SettingsPage", () => {
     expect(screen.getByRole("heading", { name: "设置" })).toBeTruthy();
     await waitFor(() => expect(screen.getByRole("heading", { name: "连接 Codex，开始感知任务" })).toBeTruthy());
     expect(screen.getAllByRole("button", { name: "安装 Hook" }).length).toBeGreaterThan(0);
+    expect(screen.getByRole("radiogroup", { name: "界面主题" })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: /Native Calm/ }).getAttribute("aria-checked")).toBe("true");
   });
 
   it("shows a recoverable error screen and reports React rendering failures", async () => {
